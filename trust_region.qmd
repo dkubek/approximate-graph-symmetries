@@ -1,0 +1,205 @@
+---
+title: "Trust Region"
+format: html
+---
+
+```{python}
+import numpy as np
+import pandas as pd
+import networkx as nx
+
+
+import scipy as sp
+
+import seaborn as sns
+sns.set_theme()
+```
+
+
+```{python}
+class GNMInstance:
+    def __init__(self,no_nodes, no_edges, seed=None):
+        self.no_nodes = no_nodes
+        self.no_edges = no_edges
+
+        self._graph = None
+        self._adjacency = None
+
+    def _generate(self):
+        self._graph = nx.gnm_random_graph(self.no_nodes, self.no_edges)
+
+    @property
+    def n(self):
+        return self.no_nodes
+
+    @property
+    def m(self):
+        return self.no_edges
+
+    @property
+    def adjacency(self):
+        if self._adjacency is not None:
+            return self._adjacency
+
+        self._adjacency = nx.to_numpy_array(self.graph)
+        return self._adjacency
+
+    @property
+    def graph(self):
+        if self._graph is None:
+            self._generate()
+
+        return self._graph
+
+
+
+```
+
+```{python}
+nNodes = 5
+mEdges = 7
+instance = GNMInstance(5, 7)
+
+# G0 = nx.barabasi_albert_graph(nNodes, 5)
+
+nx.draw(instance.graph, labels = {x:x for x in instance.graph.nodes()})
+```
+
+```{python}
+from scipy.optimize import Bounds
+from scipy.optimize import LinearConstraint
+from scipy.optimize import minimize
+
+def permutation_to_matrix(pi):
+    n = len(pi)
+    ans = np.zeros((n, n))
+    for i, j in enumerate(pi):
+        ans[i, j] = 1
+
+    return ans
+
+def random_petmuation_matrix(n):
+    # TODO: Use seed
+    pi = np.random.permutation(n)
+    return permutation_to_matrix(pi)
+
+
+def doubly_stochastic(P: np.ndarray, tol: float = 1e-9) -> np.ndarray:
+    # Adapted from @btaba implementation
+    # https://github.com/btaba/sinkhorn_knopp
+    # of Sinkhorn-Knopp algorithm
+    # https://projecteuclid.org/euclid.pjm/1102992505
+
+    max_iter = 1000
+    c = 1 / P.sum(axis=0)
+    r = 1 / (P @ c)
+    P_eps = P
+
+    for it in range(max_iter):
+        if (np.abs(P_eps.sum(axis=1) - 1) < tol).all() and (
+            np.abs(P_eps.sum(axis=0) - 1) < tol
+        ).all():
+            # All column/row sums ~= 1 within threshold
+            break
+
+        c = 1 / (r @ P)
+        r = 1 / (P @ c)
+        P_eps = r[:, None] * P * c
+
+    return P_eps
+
+
+class TrustRegionSolver:
+
+    def __init__(init_method=None):
+        assert init_method in ("uniform", "random")
+        self.init_method = init_method
+
+        self._instance = None
+        self._formulated = False
+
+        self._dimension = None
+        self._constraint_matrix = None
+        self._rhs = None
+        self._lower_bounds = None
+        self._upper_bounds = None
+
+    def formulate(self, instance):
+        self._instance = instance
+        self._formulated = False
+
+        self._dimension = instance.n * instance.n
+
+        M, b = self._formulate_constraints()
+
+        self._constraint_matrix = M
+        self._rhs = b
+        self._lower_bounds = np.zeros(self._dimension)
+        self._upper_bounds = np.ones(self._dimension)
+
+        return
+
+    def _formulate_constraints(self):
+        n = self._instance.n
+
+        # Constraints
+        ## Row sums
+        M1 = sp.sparse.kron(np.ones(n), sp.sparse.eye(n))
+        b1 = np.ones(n)
+
+        ## Columns sums
+        M2 = sp.sparse.kron(sp.sparse.eye(n), np.ones(n))
+        b2 = np.ones(n)
+
+        # Constraint Matrix
+        M = sp.sparse.vstack([M1, M2])
+
+        # RHS
+        b = np.hstack([b1, b2])
+
+        return M, b
+
+    def _initial_point(self):
+        assert self._formulated
+
+        if self._init_method == 'uniform':
+            return np.ones(self._dimension) / self._instance.n
+        elif self._init_method == 'random':
+            return doubly_stochastic()
+        else:
+            raise NotImplementedError()
+
+    def solve(self):
+        assert self._formulated
+
+        linear_constraints = LinearConstraint(
+            self._constraint_matrix, self._rhs, self._rhs
+        )
+        variable_bounds = Bounds(self._lower_bounds, self._upper_bounds)
+
+        P_0 = self._initial_point()
+        x_0 = P_0.flatten()
+
+        res = minimize(
+            self.objective,
+            x_0,
+            method="trust-constr",
+            constraints=[linear_constraints],
+            options={"verbose": 1},
+            bounds=variable_bounds,
+        )
+        self._result = res
+
+        return res
+
+    def _objective_parametrized(self, A, x):
+        n = self._instance.n
+        P = x.reshape(n, n)
+        return -np.trace(A @ P @ A.T @ P.T)
+
+    def objective(self, x):
+        return self.objective_parametrized(self, self._instance.adjacency, x)
+```
+
+```{python}
+```

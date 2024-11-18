@@ -1,0 +1,23 @@
+[tool.poetry]
+name = "approximate-graph-symmetries"
+version = "0.1.0"
+description = ""
+authors = ["David Kubek <david.kubek@gmail.com>"]
+license = "Unlicense"
+readme = "README.md"
+
+[tool.poetry.dependencies]
+python = "^3.11"
+numpy = "^2.1.2"
+scipy = "^1.14.1"
+networkx = "^3.3"
+pandas = "^2.2.3"
+seaborn = "^0.13.2"
+jupyter = "^1.1.1"
+
+[tool.poetry.group.dev.dependencies]
+pylama = "^8.4.1"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
