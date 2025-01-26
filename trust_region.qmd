@@ -8,7 +8,6 @@ import numpy as np
 import pandas as pd
 import networkx as nx
 
-
 import scipy as sp
 
 import seaborn as sns
@@ -52,6 +51,34 @@ class GNMInstance:
         return self._graph
 
 
+class GraphInstance:
+    def __init__(self, G: nx.Graph):
+        self.no_nodes = G.number_of_nodes()
+        self.no_edges = G.number_of_edges()
+
+        self._graph = G
+        self._adjacency = None
+
+    @property
+    def n(self):
+        return self.no_nodes
+
+    @property
+    def m(self):
+        return self.no_edges
+
+    @property
+    def adjacency(self):
+        if self._adjacency is not None:
+            return self._adjacency
+
+        self._adjacency = nx.to_numpy_array(self.graph)
+        return self._adjacency
+
+    @property
+    def graph(self):
+        return self._graph
+
 
 ```
 
@@ -66,17 +93,63 @@ nx.draw(instance.graph, labels = {x:x for x in instance.graph.nodes()})
 ```
 
 ```{python}
+class ObjectiveFunction():
+    def __init__(self, instance):
+        self._instance = instance
+
+    def __call__(self, *args, **kwargs):
+        raise NotImplementedError("Objective function call not implemented")
+
+    def jacobian(self):
+        raise NotImplementedError("Jacobian not defined")
+
+    def hessian(self):
+        raise NotImplementedError("Hessian not defined")
+
+class NonConvexRelaxation(ObjectiveFunction):
+    def __call__(self, x):
+        n = self._instance.n
+        A = self._instance.adjacency
+        P = x.reshape(n, n)
+        return -np.trace(A @ P @ A.T @ P.T)
+
+class NonConvexRelaxationPenalized(ObjectiveFunction):
+    def __init__(self, instance, c):
+        self._instance = instance
+
+        self.c_mat = np.diag(np.ones(instance.n) * c)
+
+    def __call__(self, x):
+        n = self._instance.n
+        A = self._instance.adjacency
+        P = x.reshape(n, n)
+        return -np.trace(A @ P @ A.T @ P.T - self.c_mat @ P)
+
+class DynamicFixedPointsGMP(ObjectiveFunction):
+    def __init__(self, instance):
+        self._instance = instance
+
+    def __call__(self, x):
+        n = self._instance.n
+        A = self._instance.adjacency
+        P = x.reshape(n, n)
+        E = np.linalg.norm(A - P @ A @ P.T, 'fro')
+
+        # Relaxed notion of a fixed point
+        F = np.trace(P)
+
+        return E / (n * (n - 1) - 2 * F * (F - 1))
+```
+
+```{python}
 from scipy.optimize import Bounds
 from scipy.optimize import LinearConstraint
 from scipy.optimize import minimize
 
 def permutation_to_matrix(pi):
     n = len(pi)
-    ans = np.zeros((n, n))
-    for i, j in enumerate(pi):
-        ans[i, j] = 1
-
-    return ans
+    Im = np.eye(n)
+    return Im[:,pi]
 
 def random_petmuation_matrix(n):
     # TODO: Use seed
@@ -111,9 +184,13 @@ def doubly_stochastic(P: np.ndarray, tol: float = 1e-9) -> np.ndarray:
 
 class TrustRegionSolver:
 
-    def __init__(init_method=None):
+    def __init__(
+        self,
+        init_method="uniform",
+    ):
         assert init_method in ("uniform", "random")
-        self.init_method = init_method
+
+        self._init_method = init_method
 
         self._instance = None
         self._formulated = False
@@ -137,7 +214,7 @@ class TrustRegionSolver:
         self._lower_bounds = np.zeros(self._dimension)
         self._upper_bounds = np.ones(self._dimension)
 
-        return
+        self._formulated = True
 
     def _formulate_constraints(self):
         n = self._instance.n
@@ -165,11 +242,13 @@ class TrustRegionSolver:
         if self._init_method == 'uniform':
             return np.ones(self._dimension) / self._instance.n
         elif self._init_method == 'random':
-            return doubly_stochastic()
+            n = self._instance.n
+            S = np.random.random((n, n))
+            return doubly_stochastic(S)
         else:
             raise NotImplementedError()
 
-    def solve(self):
+    def solve(self, obj, callback=None):
         assert self._formulated
 
         linear_constraints = LinearConstraint(
@@ -181,25 +260,268 @@ class TrustRegionSolver:
         x_0 = P_0.flatten()
 
         res = minimize(
-            self.objective,
+            obj,
             x_0,
             method="trust-constr",
             constraints=[linear_constraints],
-            options={"verbose": 1},
             bounds=variable_bounds,
+            options={"verbose": 1},
+            callback=callback
         )
         self._result = res
 
         return res
-
-    def _objective_parametrized(self, A, x):
-        n = self._instance.n
-        P = x.reshape(n, n)
-        return -np.trace(A @ P @ A.T @ P.T)
-
-    def objective(self, x):
-        return self.objective_parametrized(self, self._instance.adjacency, x)
 ```
 
 ```{python}
+# ps = np.linspace(0, 1, num=10)
+ps = [0.5]
+# ns = np.logspace(1, 3, num=10, dtype=int)
+ns = [32]
+
+solver = TrustRegionSolver(init_method='uniform')
+if False:
+    for p in ps:
+        for n in ns:
+            m = int(p * n)
+            print(n, m)
+            instance = GNMInstance(n, m)
+            solver.formulate(instance)
+            res = solver.solve()
+            print(res)
+
+```
+
+
+
+```{python}
+# The 4 smallest asymmetric graphs
+
+ASYMMETRIC_GRAPH_1 = nx.Graph()
+ASYMMETRIC_GRAPH_1.add_nodes_from(range(6))
+ASYMMETRIC_GRAPH_1.add_edges_from(
+    [
+        (0, 1),
+        (1, 2),
+        (2, 3),
+        (3, 4),
+        (1, 5),
+        (5, 2),
+    ]
+)
+
+ASYMMETRIC_GRAPH_2 = nx.Graph()
+ASYMMETRIC_GRAPH_2.add_nodes_from(range(6))
+ASYMMETRIC_GRAPH_2.add_edges_from(
+    [
+        (0, 1),
+        (1, 3),
+        (0, 2),
+        (2, 3),
+        (2, 4),
+        (3, 5),
+        (3, 4),
+    ]
+)
+
+ASYMMETRIC_GRAPH_3 = nx.Graph()
+ASYMMETRIC_GRAPH_3.add_nodes_from(range(6))
+ASYMMETRIC_GRAPH_3.add_edges_from(
+    [
+        (0, 1),
+        (0, 2),
+        (1, 2),
+        (1, 3),
+        (2, 4),
+        (3, 4),
+        (3, 5),
+    ]
+)
+
+ASYMMETRIC_GRAPH_4 = nx.Graph()
+ASYMMETRIC_GRAPH_4.add_nodes_from(range(6))
+ASYMMETRIC_GRAPH_4.add_edges_from(
+    [
+        (0, 1),
+        (0, 2),
+        (0, 3),
+        (1, 3),
+        (2, 3),
+        (2, 4),
+        (3, 5),
+    ]
+)
+
+
+nx.draw_kamada_kawai(ASYMMETRIC_GRAPH_4)
+```
+
+
+```{python}
+import random
+import itertools
+
+def is_symmetric(G: nx.Graph):
+    n = G.number_of_nodes()
+
+    pis = itertools.permutations(range(n))
+    # Skip the identity
+    next(pis)
+
+    A = nx.to_numpy_array(G)
+    print(G.adjacency)
+    for pi in pis:
+        P = permutation_to_matrix(pi)
+        if np.array_equal(A @ P, P @ A):
+            return True
+
+    return False
+
+def generate_asymmetric_graph(n, p=0.5):
+    print(f"Generating random asymmetric graph n={n} p={p}")
+    count = 0
+    while True:
+        print(f"{count}")
+        G = nx.erdos_renyi_graph(n, p)
+
+        print(G)
+        if is_symmetric(G):
+            count += 1
+            continue
+
+        break
+
+    return G
+
+if False:
+    for n in range(7, 12):
+        graph = generate_asymmetric_graph(n)
+        nx.write_adjlist(graph, f"asymmetric_{n}.adjlist")
+        nx.write_adjlist(nx.complement(graph), f"asymmetric_{n}_complement.adjlist")
+        nx.draw_kamada_kawai(graph)
+        nx.draw_kamada_kawai(nx.complement(graph), node_color="red")
+
+```
+
+```{python}
+def _compE(A, P):
+    return 1/4 * np.linalg.norm(A - P @ A @ P.T, 'fro')**2
+
+def _compS(A, P, E=None):
+    if E is None:
+        E = _compE(A, P)
+
+    n = int(np.sqrt(P.size))
+    return 4*E/(n*(n-1))
+
+def compES(A, perm):
+    """
+    Compute E(A) (1.1) and S(A) (1.2)
+    """
+
+    P = permutation_to_matrix(perm)
+    N = len(perm)
+    E = _compE(A, P)
+    S = _compS(A, P, E=E)
+    return E, S
+```
+
+
+```{python}
+from scipy.optimize import linear_sum_assignment
+import pandas as pd
+
+
+solver = TrustRegionSolver(init_method='uniform')
+G = nx.read_adjlist("./data/asymmetric/asymmetric_11.adjlist")
+instance = GraphInstance(G)
+
+class CollectIterationData:
+    def __init__(self, instance):
+        self.instance = instance
+        self.data = {
+            "iter": [],
+            "P_hat": [],
+            "E_relax": [],
+            "S_relax": [],
+            "E_hat": [],
+            "S_hat": [],
+            "obj": [],
+        }
+
+    def __call__(self, intermediate_result):
+        x = intermediate_result.x
+        n = int(np.sqrt(x.size))
+        D = x.reshape((n, n))
+
+        _, col = linear_sum_assignment(-D)
+
+        A = self.instance.adjacency
+
+        P = permutation_to_matrix(col)
+        E_relax = _compE(A, D)
+        S_relax = _compS(A, D, E=E_relax)
+        E_hat = _compE(A, P)
+        S_hat = _compS(A, P, E=E_hat)  
+
+        self.data["iter"].append(intermediate_result.nit)
+        self.data["P_hat"].append(col)
+        self.data["E_relax"].append(E_relax)
+        self.data["S_relax"].append(S_relax)
+        self.data["E_hat"].append(E_hat)
+        self.data["S_hat"].append(S_hat)
+        self.data["obj"].append(intermediate_result.fun)
+    
+    def to_dataframe(self):
+        return pd.DataFrame(self.data)
+
+solver.formulate(instance)
+cb = CollectIterationData(instance)
+res = solver.solve(NonConvexRelaxation(instance), callback=cb)
+print(res)
+
+df_test = cb.to_dataframe()
+```
+
+```{python}
+hlp = df_test.melt(
+    id_vars=["iter"],
+    value_vars=["S_relax", "S_hat"],
+    var_name="metric",
+    value_name="value",
+)
+sns.relplot(data=hlp, x="iter", y="value", hue="metric", aspect=2)
+```
+
+```{python}
+import matplotlib.pyplot as plt
+```
+
+```{python}
+G = nx.erdos_renyi_graph(n=20, p=0.5)
+instance = GraphInstance(G)
+solver = TrustRegionSolver(init_method="random")
+solver.formulate(instance)
+cb = CollectIterationData(instance)
+obj = NonConvexRelaxationPenalized(instance, c=0.2)
+res = solver.solve(obj, callback=cb)
+
+# Plot data
+df = cb.to_dataframe()
+print(df)
+print(df.iloc[-1]["P_hat"])
+hlp = df.melt(
+    id_vars=["iter"],
+    value_vars=["S_relax", "S_hat"],
+    var_name="metric",
+    value_name="value",
+)
+
+sns.relplot(data=hlp, x="iter", y="value", hue="metric", aspect=2, kind="line")
+sns.relplot(data=df, x="iter", y="obj", aspect=2, kind="line")
+```
+
+
+```{python}
+
 ```
