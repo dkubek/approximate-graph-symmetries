@@ -10,77 +10,12 @@ import networkx as nx
 
 import scipy as sp
 
+import ags.relaxationmethods.utils
+
 import seaborn as sns
 sns.set_theme()
 ```
 
-
-```{python}
-class GNMInstance:
-    def __init__(self,no_nodes, no_edges, seed=None):
-        self.no_nodes = no_nodes
-        self.no_edges = no_edges
-
-        self._graph = None
-        self._adjacency = None
-
-    def _generate(self):
-        self._graph = nx.gnm_random_graph(self.no_nodes, self.no_edges)
-
-    @property
-    def n(self):
-        return self.no_nodes
-
-    @property
-    def m(self):
-        return self.no_edges
-
-    @property
-    def adjacency(self):
-        if self._adjacency is not None:
-            return self._adjacency
-
-        self._adjacency = nx.to_numpy_array(self.graph)
-        return self._adjacency
-
-    @property
-    def graph(self):
-        if self._graph is None:
-            self._generate()
-
-        return self._graph
-
-
-class GraphInstance:
-    def __init__(self, G: nx.Graph):
-        self.no_nodes = G.number_of_nodes()
-        self.no_edges = G.number_of_edges()
-
-        self._graph = G
-        self._adjacency = None
-
-    @property
-    def n(self):
-        return self.no_nodes
-
-    @property
-    def m(self):
-        return self.no_edges
-
-    @property
-    def adjacency(self):
-        if self._adjacency is not None:
-            return self._adjacency
-
-        self._adjacency = nx.to_numpy_array(self.graph)
-        return self._adjacency
-
-    @property
-    def graph(self):
-        return self._graph
-
-
-```
 
 ```{python}
 nNodes = 5
@@ -145,42 +80,6 @@ class DynamicFixedPointsGMP(ObjectiveFunction):
 from scipy.optimize import Bounds
 from scipy.optimize import LinearConstraint
 from scipy.optimize import minimize
-
-def permutation_to_matrix(pi):
-    n = len(pi)
-    Im = np.eye(n)
-    return Im[:,pi]
-
-def random_petmuation_matrix(n):
-    # TODO: Use seed
-    pi = np.random.permutation(n)
-    return permutation_to_matrix(pi)
-
-
-def doubly_stochastic(P: np.ndarray, tol: float = 1e-9) -> np.ndarray:
-    # Adapted from @btaba implementation
-    # https://github.com/btaba/sinkhorn_knopp
-    # of Sinkhorn-Knopp algorithm
-    # https://projecteuclid.org/euclid.pjm/1102992505
-
-    max_iter = 1000
-    c = 1 / P.sum(axis=0)
-    r = 1 / (P @ c)
-    P_eps = P
-
-    for it in range(max_iter):
-        if (np.abs(P_eps.sum(axis=1) - 1) < tol).all() and (
-            np.abs(P_eps.sum(axis=0) - 1) < tol
-        ).all():
-            # All column/row sums ~= 1 within threshold
-            break
-
-        c = 1 / (r @ P)
-        r = 1 / (P @ c)
-        P_eps = r[:, None] * P * c
-
-    return P_eps
-
 
 class TrustRegionSolver:
 
@@ -361,38 +260,6 @@ nx.draw_kamada_kawai(ASYMMETRIC_GRAPH_4)
 import random
 import itertools
 
-def is_symmetric(G: nx.Graph):
-    n = G.number_of_nodes()
-
-    pis = itertools.permutations(range(n))
-    # Skip the identity
-    next(pis)
-
-    A = nx.to_numpy_array(G)
-    print(G.adjacency)
-    for pi in pis:
-        P = permutation_to_matrix(pi)
-        if np.array_equal(A @ P, P @ A):
-            return True
-
-    return False
-
-def generate_asymmetric_graph(n, p=0.5):
-    print(f"Generating random asymmetric graph n={n} p={p}")
-    count = 0
-    while True:
-        print(f"{count}")
-        G = nx.erdos_renyi_graph(n, p)
-
-        print(G)
-        if is_symmetric(G):
-            count += 1
-            continue
-
-        break
-
-    return G
-
 if False:
     for n in range(7, 12):
         graph = generate_asymmetric_graph(n)
@@ -404,26 +271,6 @@ if False:
 ```
 
 ```{python}
-def _compE(A, P):
-    return 1/4 * np.linalg.norm(A - P @ A @ P.T, 'fro')**2
-
-def _compS(A, P, E=None):
-    if E is None:
-        E = _compE(A, P)
-
-    n = int(np.sqrt(P.size))
-    return 4*E/(n*(n-1))
-
-def compES(A, perm):
-    """
-    Compute E(A) (1.1) and S(A) (1.2)
-    """
-
-    P = permutation_to_matrix(perm)
-    N = len(perm)
-    E = _compE(A, P)
-    S = _compS(A, P, E=E)
-    return E, S
 ```
 
 
