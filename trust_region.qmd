@@ -11,6 +11,7 @@ import networkx as nx
 import scipy as sp
 
 import ags.relaxationmethods.utils
+from ags.relaxationmethods.graph_instances import GNMInstance
 
 import seaborn as sns
 sns.set_theme()
@@ -27,152 +28,10 @@ instance = GNMInstance(5, 7)
 nx.draw(instance.graph, labels = {x:x for x in instance.graph.nodes()})
 ```
 
-```{python}
-class ObjectiveFunction():
-    def __init__(self, instance):
-        self._instance = instance
-
-    def __call__(self, *args, **kwargs):
-        raise NotImplementedError("Objective function call not implemented")
-
-    def jacobian(self):
-        raise NotImplementedError("Jacobian not defined")
-
-    def hessian(self):
-        raise NotImplementedError("Hessian not defined")
-
-class NonConvexRelaxation(ObjectiveFunction):
-    def __call__(self, x):
-        n = self._instance.n
-        A = self._instance.adjacency
-        P = x.reshape(n, n)
-        return -np.trace(A @ P @ A.T @ P.T)
-
-class NonConvexRelaxationPenalized(ObjectiveFunction):
-    def __init__(self, instance, c):
-        self._instance = instance
-
-        self.c_mat = np.diag(np.ones(instance.n) * c)
-
-    def __call__(self, x):
-        n = self._instance.n
-        A = self._instance.adjacency
-        P = x.reshape(n, n)
-        return -np.trace(A @ P @ A.T @ P.T - self.c_mat @ P)
-
-class DynamicFixedPointsGMP(ObjectiveFunction):
-    def __init__(self, instance):
-        self._instance = instance
-
-    def __call__(self, x):
-        n = self._instance.n
-        A = self._instance.adjacency
-        P = x.reshape(n, n)
-        E = np.linalg.norm(A - P @ A @ P.T, 'fro')
-
-        # Relaxed notion of a fixed point
-        F = np.trace(P)
-
-        return E / (n * (n - 1) - 2 * F * (F - 1))
-```
 
 ```{python}
-from scipy.optimize import Bounds
-from scipy.optimize import LinearConstraint
-from scipy.optimize import minimize
+from ags.relaxationmethods.trustregion import TrustRegionSolver
 
-class TrustRegionSolver:
-
-    def __init__(
-        self,
-        init_method="uniform",
-    ):
-        assert init_method in ("uniform", "random")
-
-        self._init_method = init_method
-
-        self._instance = None
-        self._formulated = False
-
-        self._dimension = None
-        self._constraint_matrix = None
-        self._rhs = None
-        self._lower_bounds = None
-        self._upper_bounds = None
-
-    def formulate(self, instance):
-        self._instance = instance
-        self._formulated = False
-
-        self._dimension = instance.n * instance.n
-
-        M, b = self._formulate_constraints()
-
-        self._constraint_matrix = M
-        self._rhs = b
-        self._lower_bounds = np.zeros(self._dimension)
-        self._upper_bounds = np.ones(self._dimension)
-
-        self._formulated = True
-
-    def _formulate_constraints(self):
-        n = self._instance.n
-
-        # Constraints
-        ## Row sums
-        M1 = sp.sparse.kron(np.ones(n), sp.sparse.eye(n))
-        b1 = np.ones(n)
-
-        ## Columns sums
-        M2 = sp.sparse.kron(sp.sparse.eye(n), np.ones(n))
-        b2 = np.ones(n)
-
-        # Constraint Matrix
-        M = sp.sparse.vstack([M1, M2])
-
-        # RHS
-        b = np.hstack([b1, b2])
-
-        return M, b
-
-    def _initial_point(self):
-        assert self._formulated
-
-        if self._init_method == 'uniform':
-            return np.ones(self._dimension) / self._instance.n
-        elif self._init_method == 'random':
-            n = self._instance.n
-            S = np.random.random((n, n))
-            return doubly_stochastic(S)
-        else:
-            raise NotImplementedError()
-
-    def solve(self, obj, callback=None):
-        assert self._formulated
-
-        linear_constraints = LinearConstraint(
-            self._constraint_matrix, self._rhs, self._rhs
-        )
-        variable_bounds = Bounds(self._lower_bounds, self._upper_bounds)
-
-        P_0 = self._initial_point()
-        x_0 = P_0.flatten()
-
-        res = minimize(
-            obj,
-            x_0,
-            method="trust-constr",
-            constraints=[linear_constraints],
-            bounds=variable_bounds,
-            options={"verbose": 1},
-            callback=callback
-        )
-        self._result = res
-
-        return res
-```
-
-```{python}
 # ps = np.linspace(0, 1, num=10)
 ps = [0.5]
 # ns = np.logspace(1, 3, num=10, dtype=int)
@@ -194,69 +53,6 @@ if False:
 
 
 ```{python}
-# The 4 smallest asymmetric graphs
-
-ASYMMETRIC_GRAPH_1 = nx.Graph()
-ASYMMETRIC_GRAPH_1.add_nodes_from(range(6))
-ASYMMETRIC_GRAPH_1.add_edges_from(
-    [
-        (0, 1),
-        (1, 2),
-        (2, 3),
-        (3, 4),
-        (1, 5),
-        (5, 2),
-    ]
-)
-
-ASYMMETRIC_GRAPH_2 = nx.Graph()
-ASYMMETRIC_GRAPH_2.add_nodes_from(range(6))
-ASYMMETRIC_GRAPH_2.add_edges_from(
-    [
-        (0, 1),
-        (1, 3),
-        (0, 2),
-        (2, 3),
-        (2, 4),
-        (3, 5),
-        (3, 4),
-    ]
-)
-
-ASYMMETRIC_GRAPH_3 = nx.Graph()
-ASYMMETRIC_GRAPH_3.add_nodes_from(range(6))
-ASYMMETRIC_GRAPH_3.add_edges_from(
-    [
-        (0, 1),
-        (0, 2),
-        (1, 2),
-        (1, 3),
-        (2, 4),
-        (3, 4),
-        (3, 5),
-    ]
-)
-
-ASYMMETRIC_GRAPH_4 = nx.Graph()
-ASYMMETRIC_GRAPH_4.add_nodes_from(range(6))
-ASYMMETRIC_GRAPH_4.add_edges_from(
-    [
-        (0, 1),
-        (0, 2),
-        (0, 3),
-        (1, 3),
-        (2, 3),
-        (2, 4),
-        (3, 5),
-    ]
-)
-
-
-nx.draw_kamada_kawai(ASYMMETRIC_GRAPH_4)
-```
-
-
-```{python}
 import random
 import itertools
 
@@ -270,13 +66,14 @@ if False:
 
 ```
 
-```{python}
-```
-
 
 ```{python}
 from scipy.optimize import linear_sum_assignment
 import pandas as pd
+
+from ags.relaxationmethods.graph_instances import GraphInstance
+from ags.relaxationmethods.trustregion import NonConvexRelaxation
+from ags.relaxationmethods.utils import permutation_to_matrix, _compE, _compS, compES
 
 
 solver = TrustRegionSolver(init_method='uniform')
@@ -295,6 +92,9 @@ class CollectIterationData:
             "S_hat": [],
             "obj": [],
         }
+
+        self.solution_leading_to_lowest_obj = None
+        self.lowest_obj = float('inf')
 
     def __call__(self, intermediate_result):
         x = intermediate_result.x
@@ -318,6 +118,11 @@ class CollectIterationData:
         self.data["E_hat"].append(E_hat)
         self.data["S_hat"].append(S_hat)
         self.data["obj"].append(intermediate_result.fun)
+
+        if intermediate_result.fun < self.lowest_obj:
+            self.lowest_obj = intermediate_result.fun
+            self.solution_leading_to_lowest_obj = D
+
     
     def to_dataframe(self):
         return pd.DataFrame(self.data)
@@ -341,16 +146,18 @@ sns.relplot(data=hlp, x="iter", y="value", hue="metric", aspect=2)
 ```
 
 ```{python}
-import matplotlib.pyplot as plt
-```
+from ags.relaxationmethods.trustregion import NonConvexRelaxationPenalized, DynamicFixedPointsGMP, NonConvexRelaxation
 
-```{python}
-G = nx.erdos_renyi_graph(n=20, p=0.5)
+G = nx.erdos_renyi_graph(n=30, p=0.5)
 instance = GraphInstance(G)
 solver = TrustRegionSolver(init_method="random")
 solver.formulate(instance)
 cb = CollectIterationData(instance)
+# obj = NonConvexRelaxation(instance)
+# obj.jacobian = None
+# obj.hessian = None
 obj = NonConvexRelaxationPenalized(instance, c=0.2)
+#obj = DynamicFixedPointsGMP(instance)
 res = solver.solve(obj, callback=cb)
 
 # Plot data
@@ -366,9 +173,202 @@ hlp = df.melt(
 
 sns.relplot(data=hlp, x="iter", y="value", hue="metric", aspect=2, kind="line")
 sns.relplot(data=df, x="iter", y="obj", aspect=2, kind="line")
+sns.relplot(data=df, x="iter", y="S_hat", aspect=2, kind="line")
+sns.relplot(data=df, x="iter", y="S_relax", aspect=2, kind="line")
+```
+
+When computing with exact gradient there seems to be an extreme spike in S_relax whether when using a numerically approximated gradient and hessian the curves S_relax and S_hat seems to be more in line.
+
+```{python}
+import numpy as np
+import networkx as nx
+from scipy.optimize import approx_fprime, minimize
+from ags.relaxationmethods.trustregion import NonConvexRelaxation, NonConvexRelaxationPenalized
+from ags.relaxationmethods.graph_instances import GraphInstance
+
+import jax.numpy as jnp
+from jax import hessian, jacobian
+
+
+def g(x, c=0.2):
+    n = instance.n
+    A = instance.adjacency
+    P = x.reshape(n, n)
+    c_mat = np.diag(jnp.ones(n) * c)
+    return -jnp.trace(A @ P @ A.T @ P.T - c_mat @ P)
+
+epsilon = np.sqrt(np.finfo(float).eps)  # Small step size
+n = 5
+G = nx.erdos_renyi_graph(n, p=0.5)
+instance = GraphInstance(G)
+
+P0 = np.ones((n, n)) / n
+x0 = P0.reshape(n * n)
+f = NonConvexRelaxationPenalized(instance, c=0.2)
+grad_approx = jacobian(g)(x0).reshape(n, n)
+grad_exact = f.jacobian(P0)
+print(grad_approx, grad_exact)
+print(np.allclose(grad_approx, grad_exact))
+
+hess_approx = hessian(g)(x0)
+hess_exact = f.hessian(P0)
+
+print(hess_approx)
+print(hess_exact)
+np.allclose(hess_approx, hess_exact)
 ```
 
 
 ```{python}
+# read and solve pidnebesna
+from pathlib import Path
+import pickle
+import time
+import json
+import os
+import shutil
+import numpy as np
+import networkx as nx
+
+from ags.relaxationmethods.trustregion import NonConvexRelaxation, NonConvexRelaxationPenalized
+from ags.relaxationmethods.graph_instances import GraphInstance
+
+from scipy.optimize import linear_sum_assignment
+
+from ags.relaxationmethods.graph_instances import GraphInstance
+from ags.relaxationmethods.trustregion import NonConvexRelaxation
+from ags.relaxationmethods.utils import permutation_to_matrix, _compE, _compS, compES
+from ags.relaxationmethods.trustregion import TrustRegionSolver
+
+no_iterations = 1
+
+instance_folder = Path("data/pidnebesna")
+output_folder = Path("output/")
+if output_folder.exists():
+    shutil.rmtree(output_folder)
+
+# graph_type_folders = [ dir for dir in instance_folder.iterdir() if dir.is_dir() ]
+graph_type_folders = [Path('data/pidnebesna/ER')]
+for graph_type_folder in graph_type_folders:
+    graph_type = graph_type_folder.name
+    print(graph_type)
+    instances = [
+        instance
+        for instance in graph_type_folder.iterdir()
+        if instance.is_file()
+        if not '_allInfo' in instance.name
+    ]
+
+    for instance in instances:
+        instance_name = instance.name.strip('.p')
+        print(instance_name)
+        with open(instance, 'rb') as fin:
+            data = pickle.load(fin)
+            print(list(data.keys()))
+            for simulation in range(39):
+                print(simulation, data[simulation].shape)
+                A = data[simulation]
+                n = A.shape[0]
+                G = nx.from_numpy_array(A)
+                instance = GraphInstance(G)
+                for init_method in ["random", "uniform"]:
+                        solver = TrustRegionSolver(init_method="random")
+                        solver.formulate(instance)
+                        obj = NonConvexRelaxationPenalized(instance, c=0.2)
+                        for run in range(no_iterations):
+                            tick = time.time()
+                            res = solver.solve(obj)
+                            tock = time.time()
+
+                            elapsed = tock - tick
+
+                            x = res.x
+                            D = x.reshape((n, n))
+                            _, pi = linear_sum_assignment(-D)
+                            P = permutation_to_matrix(pi)
+                            S_hat = _compS(A, P)
+
+                            print(elapsed)
+                            print(S_hat)
+
+                            #  method_generla/ method_version / graph_model
+                            method_general = solver.__class__.__name__
+                            method_version = f"{obj.__class__.__name__}_{init_method}"
+                            graph_model = graph_type
+
+                            outdir = output_folder / method_general / method_version / graph_model
+                            outdir.mkdir(parents=True, exist_ok=True)
+
+                            info_filename = f"{instance_name}.{simulation}.{run}.json"
+                            info = {
+                                "time": elapsed,
+                                "S(A)": S_hat,
+                            }
+                            with open(outdir / info_filename, "w") as fout:
+                                json.dump(info, fout)
+
+                            perm_dir = outdir / "permutations"
+                            perm_dir.mkdir(parents=True, exist_ok=True)
+
+                            perm_filename = f"{instance_name}.{simulation}.{run}.csv"
+                            np.savetxt(perm_dir / perm_filename, pi, delimiter=",", fmt="%d")
+
+```
+
+
+```{python}
+import numpy as np
+import matplotlib.pyplot as plt
+
+# Define x-values for both segments
+x1 = np.linspace(0, 1, 200)
+x2 = np.linspace(1, 2, 200)
+
+# Define the PDF for each segment
+y1 = x1
+y2 = 2 - x2
+
+plt.figure(figsize=(8, 5))
+plt.plot(x1, y1, label=r'$f_Z(z)=z$', color='blue')
+plt.plot(x2, y2, label=r'$f_Z(z)=2-z$', color='blue')
+plt.fill_between(x1, y1, color='blue', alpha=0.2)
+plt.fill_between(x2, y2, color='blue', alpha=0.2)
+plt.xlabel('z')
+plt.ylabel(r'$f_Z(z)$')
+plt.title('PDF of \( Z = X + Y \)')
+plt.legend()
+plt.grid(True)
+plt.show()
+```
+
+
+```{python}
+import numpy as np
+import matplotlib.pyplot as plt
+
+def fW(w):
+    """PDF of W = X + Y + Z, where X,Y,Z ~ Uniform(0,1)."""
+    if w < 0 or w > 3:
+        return 0.0
+    else if 0 <= w < 1:
+        return 0.5 * w**2
+    else if 1 <= w < 2:
+        return -w**2 + 3*w - 1.5
+    else:  # 2 <= w <= 3
+        return 0.5 * (3 - w)**2
+
+# Generate points in a region covering the support [0,3]
+x_vals = np.linspace(-0.5, 3.5, 400)
+y_vals = [fW(x) for x in x_vals]
+
+plt.figure(figsize=(8,5))
+plt.plot(x_vals, y_vals, color='blue', label='PDF of W = X + Y + Z')
+plt.fill_between(x_vals, y_vals, where=(y_vals>=0), color='blue', alpha=0.2)
+plt.xlabel('w')
+plt.ylabel('f_W(w)')
+plt.title('PDF of the Sum of 3 Independent Uniform(0,1) Random Variables')
+plt.grid(True)
+plt.legend()
+plt.show()
 
 ```

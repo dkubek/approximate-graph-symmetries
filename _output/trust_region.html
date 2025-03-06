@@ -99,16 +99,270 @@ pre > code.sourceCode > span > a:first-child::before { text-decoration: underlin
 </header>
 
 
-<div id="76fa036d" class="cell" data-execution_count="1">
+<div id="ef895a83" class="cell" data-execution_count="1">
 <div class="sourceCode cell-code" id="cb1"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb1-1"><a href="#cb1-1" aria-hidden="true" tabindex="-1"></a><span class="im">import</span> numpy <span class="im">as</span> np</span>
 <span id="cb1-2"><a href="#cb1-2" aria-hidden="true" tabindex="-1"></a><span class="im">import</span> pandas <span class="im">as</span> pd</span>
 <span id="cb1-3"><a href="#cb1-3" aria-hidden="true" tabindex="-1"></a><span class="im">import</span> networkx <span class="im">as</span> nx</span>
 <span id="cb1-4"><a href="#cb1-4" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb1-5"><a href="#cb1-5" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb1-6"><a href="#cb1-6" aria-hidden="true" tabindex="-1"></a><span class="im">import</span> scipy <span class="im">as</span> sp</span>
-<span id="cb1-7"><a href="#cb1-7" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb1-8"><a href="#cb1-8" aria-hidden="true" tabindex="-1"></a><span class="im">import</span> seaborn <span class="im">as</span> sns</span>
-<span id="cb1-9"><a href="#cb1-9" aria-hidden="true" tabindex="-1"></a>sns.set_theme()</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<span id="cb1-5"><a href="#cb1-5" aria-hidden="true" tabindex="-1"></a><span class="im">import</span> scipy <span class="im">as</span> sp</span>
+<span id="cb1-6"><a href="#cb1-6" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb1-7"><a href="#cb1-7" aria-hidden="true" tabindex="-1"></a><span class="im">import</span> ags.relaxationmethods.utils</span>
+<span id="cb1-8"><a href="#cb1-8" aria-hidden="true" tabindex="-1"></a><span class="im">from</span> ags.relaxationmethods.graph_instances <span class="im">import</span> GNMInstance</span>
+<span id="cb1-9"><a href="#cb1-9" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb1-10"><a href="#cb1-10" aria-hidden="true" tabindex="-1"></a><span class="im">import</span> seaborn <span class="im">as</span> sns</span>
+<span id="cb1-11"><a href="#cb1-11" aria-hidden="true" tabindex="-1"></a>sns.set_theme()</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+</div>
+<div id="6a7a796d" class="cell" data-execution_count="2">
+<div class="sourceCode cell-code" id="cb2"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb2-1"><a href="#cb2-1" aria-hidden="true" tabindex="-1"></a>nNodes <span class="op">=</span> <span class="dv">5</span></span>
+<span id="cb2-2"><a href="#cb2-2" aria-hidden="true" tabindex="-1"></a>mEdges <span class="op">=</span> <span class="dv">7</span></span>
+<span id="cb2-3"><a href="#cb2-3" aria-hidden="true" tabindex="-1"></a>instance <span class="op">=</span> GNMInstance(<span class="dv">5</span>, <span class="dv">7</span>)</span>
+<span id="cb2-4"><a href="#cb2-4" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb2-5"><a href="#cb2-5" aria-hidden="true" tabindex="-1"></a><span class="co"># G0 = nx.barabasi_albert_graph(nNodes, 5)</span></span>
+<span id="cb2-6"><a href="#cb2-6" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb2-7"><a href="#cb2-7" aria-hidden="true" tabindex="-1"></a>nx.draw(instance.graph, labels <span class="op">=</span> {x:x <span class="cf">for</span> x <span class="kw">in</span> instance.graph.nodes()})</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-display">
+<div>
+<figure class="figure">
+<p><img src="trust_region_files/figure-html/cell-3-output-1.png" width="691" height="499" class="figure-img"></p>
+</figure>
+</div>
+</div>
+</div>
+<div id="c9a8e92c" class="cell" data-execution_count="3">
+<div class="sourceCode cell-code" id="cb3"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb3-1"><a href="#cb3-1" aria-hidden="true" tabindex="-1"></a><span class="im">from</span> ags.relaxationmethods.trustregion <span class="im">import</span> TrustRegionSolver</span>
+<span id="cb3-2"><a href="#cb3-2" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb3-3"><a href="#cb3-3" aria-hidden="true" tabindex="-1"></a><span class="co"># ps = np.linspace(0, 1, num=10)</span></span>
+<span id="cb3-4"><a href="#cb3-4" aria-hidden="true" tabindex="-1"></a>ps <span class="op">=</span> [<span class="fl">0.5</span>]</span>
+<span id="cb3-5"><a href="#cb3-5" aria-hidden="true" tabindex="-1"></a><span class="co"># ns = np.logspace(1, 3, num=10, dtype=int)</span></span>
+<span id="cb3-6"><a href="#cb3-6" aria-hidden="true" tabindex="-1"></a>ns <span class="op">=</span> [<span class="dv">32</span>]</span>
+<span id="cb3-7"><a href="#cb3-7" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb3-8"><a href="#cb3-8" aria-hidden="true" tabindex="-1"></a>solver <span class="op">=</span> TrustRegionSolver(init_method<span class="op">=</span><span class="st">'uniform'</span>)</span>
+<span id="cb3-9"><a href="#cb3-9" aria-hidden="true" tabindex="-1"></a><span class="cf">if</span> <span class="va">False</span>:</span>
+<span id="cb3-10"><a href="#cb3-10" aria-hidden="true" tabindex="-1"></a>    <span class="cf">for</span> p <span class="kw">in</span> ps:</span>
+<span id="cb3-11"><a href="#cb3-11" aria-hidden="true" tabindex="-1"></a>        <span class="cf">for</span> n <span class="kw">in</span> ns:</span>
+<span id="cb3-12"><a href="#cb3-12" aria-hidden="true" tabindex="-1"></a>            m <span class="op">=</span> <span class="bu">int</span>(p <span class="op">*</span> n)</span>
+<span id="cb3-13"><a href="#cb3-13" aria-hidden="true" tabindex="-1"></a>            <span class="bu">print</span>(n, m)</span>
+<span id="cb3-14"><a href="#cb3-14" aria-hidden="true" tabindex="-1"></a>            instance <span class="op">=</span> GNMInstance(n, m)</span>
+<span id="cb3-15"><a href="#cb3-15" aria-hidden="true" tabindex="-1"></a>            solver.formulate(instance)</span>
+<span id="cb3-16"><a href="#cb3-16" aria-hidden="true" tabindex="-1"></a>            res <span class="op">=</span> solver.solve()</span>
+<span id="cb3-17"><a href="#cb3-17" aria-hidden="true" tabindex="-1"></a>            <span class="bu">print</span>(res)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+</div>
+<div id="77f11605" class="cell" data-execution_count="4">
+<div class="sourceCode cell-code" id="cb4"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb4-1"><a href="#cb4-1" aria-hidden="true" tabindex="-1"></a><span class="im">import</span> random</span>
+<span id="cb4-2"><a href="#cb4-2" aria-hidden="true" tabindex="-1"></a><span class="im">import</span> itertools</span>
+<span id="cb4-3"><a href="#cb4-3" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb4-4"><a href="#cb4-4" aria-hidden="true" tabindex="-1"></a><span class="cf">if</span> <span class="va">False</span>:</span>
+<span id="cb4-5"><a href="#cb4-5" aria-hidden="true" tabindex="-1"></a>    <span class="cf">for</span> n <span class="kw">in</span> <span class="bu">range</span>(<span class="dv">7</span>, <span class="dv">12</span>):</span>
+<span id="cb4-6"><a href="#cb4-6" aria-hidden="true" tabindex="-1"></a>        graph <span class="op">=</span> generate_asymmetric_graph(n)</span>
+<span id="cb4-7"><a href="#cb4-7" aria-hidden="true" tabindex="-1"></a>        nx.write_adjlist(graph, <span class="ss">f"asymmetric_</span><span class="sc">{</span>n<span class="sc">}</span><span class="ss">.adjlist"</span>)</span>
+<span id="cb4-8"><a href="#cb4-8" aria-hidden="true" tabindex="-1"></a>        nx.write_adjlist(nx.complement(graph), <span class="ss">f"asymmetric_</span><span class="sc">{</span>n<span class="sc">}</span><span class="ss">_complement.adjlist"</span>)</span>
+<span id="cb4-9"><a href="#cb4-9" aria-hidden="true" tabindex="-1"></a>        nx.draw_kamada_kawai(graph)</span>
+<span id="cb4-10"><a href="#cb4-10" aria-hidden="true" tabindex="-1"></a>        nx.draw_kamada_kawai(nx.complement(graph), node_color<span class="op">=</span><span class="st">"red"</span>)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+</div>
+<div id="e20bc2be" class="cell" data-execution_count="5">
+<div class="sourceCode cell-code" id="cb5"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb5-1"><a href="#cb5-1" aria-hidden="true" tabindex="-1"></a><span class="im">from</span> scipy.optimize <span class="im">import</span> linear_sum_assignment</span>
+<span id="cb5-2"><a href="#cb5-2" aria-hidden="true" tabindex="-1"></a><span class="im">import</span> pandas <span class="im">as</span> pd</span>
+<span id="cb5-3"><a href="#cb5-3" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb5-4"><a href="#cb5-4" aria-hidden="true" tabindex="-1"></a><span class="im">from</span> ags.relaxationmethods.graph_instances <span class="im">import</span> GraphInstance</span>
+<span id="cb5-5"><a href="#cb5-5" aria-hidden="true" tabindex="-1"></a><span class="im">from</span> ags.relaxationmethods.trustregion <span class="im">import</span> NonConvexRelaxation</span>
+<span id="cb5-6"><a href="#cb5-6" aria-hidden="true" tabindex="-1"></a><span class="im">from</span> ags.relaxationmethods.utils <span class="im">import</span> permutation_to_matrix, _compE, _compS, compES</span>
+<span id="cb5-7"><a href="#cb5-7" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb5-8"><a href="#cb5-8" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb5-9"><a href="#cb5-9" aria-hidden="true" tabindex="-1"></a>solver <span class="op">=</span> TrustRegionSolver(init_method<span class="op">=</span><span class="st">'uniform'</span>)</span>
+<span id="cb5-10"><a href="#cb5-10" aria-hidden="true" tabindex="-1"></a>G <span class="op">=</span> nx.read_adjlist(<span class="st">"./data/asymmetric/asymmetric_11.adjlist"</span>)</span>
+<span id="cb5-11"><a href="#cb5-11" aria-hidden="true" tabindex="-1"></a>instance <span class="op">=</span> GraphInstance(G)</span>
+<span id="cb5-12"><a href="#cb5-12" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb5-13"><a href="#cb5-13" aria-hidden="true" tabindex="-1"></a><span class="kw">class</span> CollectIterationData:</span>
+<span id="cb5-14"><a href="#cb5-14" aria-hidden="true" tabindex="-1"></a>    <span class="kw">def</span> <span class="fu">__init__</span>(<span class="va">self</span>, instance):</span>
+<span id="cb5-15"><a href="#cb5-15" aria-hidden="true" tabindex="-1"></a>        <span class="va">self</span>.instance <span class="op">=</span> instance</span>
+<span id="cb5-16"><a href="#cb5-16" aria-hidden="true" tabindex="-1"></a>        <span class="va">self</span>.data <span class="op">=</span> {</span>
+<span id="cb5-17"><a href="#cb5-17" aria-hidden="true" tabindex="-1"></a>            <span class="st">"iter"</span>: [],</span>
+<span id="cb5-18"><a href="#cb5-18" aria-hidden="true" tabindex="-1"></a>            <span class="st">"P_hat"</span>: [],</span>
+<span id="cb5-19"><a href="#cb5-19" aria-hidden="true" tabindex="-1"></a>            <span class="st">"E_relax"</span>: [],</span>
+<span id="cb5-20"><a href="#cb5-20" aria-hidden="true" tabindex="-1"></a>            <span class="st">"S_relax"</span>: [],</span>
+<span id="cb5-21"><a href="#cb5-21" aria-hidden="true" tabindex="-1"></a>            <span class="st">"E_hat"</span>: [],</span>
+<span id="cb5-22"><a href="#cb5-22" aria-hidden="true" tabindex="-1"></a>            <span class="st">"S_hat"</span>: [],</span>
+<span id="cb5-23"><a href="#cb5-23" aria-hidden="true" tabindex="-1"></a>            <span class="st">"obj"</span>: [],</span>
+<span id="cb5-24"><a href="#cb5-24" aria-hidden="true" tabindex="-1"></a>        }</span>
+<span id="cb5-25"><a href="#cb5-25" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb5-26"><a href="#cb5-26" aria-hidden="true" tabindex="-1"></a>    <span class="kw">def</span> <span class="fu">__call__</span>(<span class="va">self</span>, intermediate_result):</span>
+<span id="cb5-27"><a href="#cb5-27" aria-hidden="true" tabindex="-1"></a>        x <span class="op">=</span> intermediate_result.x</span>
+<span id="cb5-28"><a href="#cb5-28" aria-hidden="true" tabindex="-1"></a>        n <span class="op">=</span> <span class="bu">int</span>(np.sqrt(x.size))</span>
+<span id="cb5-29"><a href="#cb5-29" aria-hidden="true" tabindex="-1"></a>        D <span class="op">=</span> x.reshape((n, n))</span>
+<span id="cb5-30"><a href="#cb5-30" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb5-31"><a href="#cb5-31" aria-hidden="true" tabindex="-1"></a>        _, col <span class="op">=</span> linear_sum_assignment(<span class="op">-</span>D)</span>
+<span id="cb5-32"><a href="#cb5-32" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb5-33"><a href="#cb5-33" aria-hidden="true" tabindex="-1"></a>        A <span class="op">=</span> <span class="va">self</span>.instance.adjacency</span>
+<span id="cb5-34"><a href="#cb5-34" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb5-35"><a href="#cb5-35" aria-hidden="true" tabindex="-1"></a>        P <span class="op">=</span> permutation_to_matrix(col)</span>
+<span id="cb5-36"><a href="#cb5-36" aria-hidden="true" tabindex="-1"></a>        E_relax <span class="op">=</span> _compE(A, D)</span>
+<span id="cb5-37"><a href="#cb5-37" aria-hidden="true" tabindex="-1"></a>        S_relax <span class="op">=</span> _compS(A, D, E<span class="op">=</span>E_relax)</span>
+<span id="cb5-38"><a href="#cb5-38" aria-hidden="true" tabindex="-1"></a>        E_hat <span class="op">=</span> _compE(A, P)</span>
+<span id="cb5-39"><a href="#cb5-39" aria-hidden="true" tabindex="-1"></a>        S_hat <span class="op">=</span> _compS(A, P, E<span class="op">=</span>E_hat)  </span>
+<span id="cb5-40"><a href="#cb5-40" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb5-41"><a href="#cb5-41" aria-hidden="true" tabindex="-1"></a>        <span class="va">self</span>.data[<span class="st">"iter"</span>].append(intermediate_result.nit)</span>
+<span id="cb5-42"><a href="#cb5-42" aria-hidden="true" tabindex="-1"></a>        <span class="va">self</span>.data[<span class="st">"P_hat"</span>].append(col)</span>
+<span id="cb5-43"><a href="#cb5-43" aria-hidden="true" tabindex="-1"></a>        <span class="va">self</span>.data[<span class="st">"E_relax"</span>].append(E_relax)</span>
+<span id="cb5-44"><a href="#cb5-44" aria-hidden="true" tabindex="-1"></a>        <span class="va">self</span>.data[<span class="st">"S_relax"</span>].append(S_relax)</span>
+<span id="cb5-45"><a href="#cb5-45" aria-hidden="true" tabindex="-1"></a>        <span class="va">self</span>.data[<span class="st">"E_hat"</span>].append(E_hat)</span>
+<span id="cb5-46"><a href="#cb5-46" aria-hidden="true" tabindex="-1"></a>        <span class="va">self</span>.data[<span class="st">"S_hat"</span>].append(S_hat)</span>
+<span id="cb5-47"><a href="#cb5-47" aria-hidden="true" tabindex="-1"></a>        <span class="va">self</span>.data[<span class="st">"obj"</span>].append(intermediate_result.fun)</span>
+<span id="cb5-48"><a href="#cb5-48" aria-hidden="true" tabindex="-1"></a>    </span>
+<span id="cb5-49"><a href="#cb5-49" aria-hidden="true" tabindex="-1"></a>    <span class="kw">def</span> to_dataframe(<span class="va">self</span>):</span>
+<span id="cb5-50"><a href="#cb5-50" aria-hidden="true" tabindex="-1"></a>        <span class="cf">return</span> pd.DataFrame(<span class="va">self</span>.data)</span>
+<span id="cb5-51"><a href="#cb5-51" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb5-52"><a href="#cb5-52" aria-hidden="true" tabindex="-1"></a>solver.formulate(instance)</span>
+<span id="cb5-53"><a href="#cb5-53" aria-hidden="true" tabindex="-1"></a>cb <span class="op">=</span> CollectIterationData(instance)</span>
+<span id="cb5-54"><a href="#cb5-54" aria-hidden="true" tabindex="-1"></a>res <span class="op">=</span> solver.solve(NonConvexRelaxation(instance), callback<span class="op">=</span>cb)</span>
+<span id="cb5-55"><a href="#cb5-55" aria-hidden="true" tabindex="-1"></a><span class="bu">print</span>(res)</span>
+<span id="cb5-56"><a href="#cb5-56" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb5-57"><a href="#cb5-57" aria-hidden="true" tabindex="-1"></a>df_test <span class="op">=</span> cb.to_dataframe()</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>`xtol` termination condition is satisfied.
+Number of iterations: 165, function evaluations: 19764, CG iterations: 378, optimality: 2.63e-02, constraint violation: 6.66e-16, execution time: 0.47 s.
+           message: `xtol` termination condition is satisfied.
+           success: True
+            status: 2
+               fun: -53.7602535768122
+                 x: [ 9.964e-01  3.124e-04 ...  3.086e-04  9.952e-01]
+               nit: 165
+              nfev: 19764
+              njev: 162
+              nhev: 0
+          cg_niter: 378
+      cg_stop_cond: 2
+              grad: [-1.197e+01 -6.006e+00 ... -2.007e+00 -9.979e+00]
+   lagrangian_grad: [ 2.611e-02 -6.145e-03 ... -6.794e-03  2.111e-02]
+            constr: [array([ 1.000e+00,  1.000e+00, ...,  1.000e+00,
+                            1.000e+00]), array([ 9.964e-01,  3.124e-04, ...,  3.086e-04,
+                            9.952e-01])]
+               jac: [&lt;Compressed Sparse Row sparse matrix of dtype 'float64'
+                        with 242 stored elements and shape (22, 121)&gt;, &lt;Compressed Sparse Row sparse matrix of dtype 'float64'
+                        with 121 stored elements and shape (121, 121)&gt;]
+       constr_nfev: [0, 0]
+       constr_njev: [0, 0]
+       constr_nhev: [0, 0]
+                 v: [array([ 3.635e+15,  3.635e+15, ..., -3.635e+15,
+                           -3.635e+15]), array([ 5.000e-01, -8.000e+00, ..., -7.000e+00,
+                            5.000e-01])]
+            method: tr_interior_point
+        optimality: 0.026316165924072266
+  constr_violation: 6.661338147750939e-16
+    execution_time: 0.4727299213409424
+         tr_radius: 1.0000000000000005e-09
+    constr_penalty: 1.0
+ barrier_parameter: 2.048000000000001e-09
+ barrier_tolerance: 2.048000000000001e-09
+             niter: 165</code></pre>
+</div>
+</div>
+<div id="5ebde91d" class="cell" data-execution_count="6">
+<div class="sourceCode cell-code" id="cb7"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb7-1"><a href="#cb7-1" aria-hidden="true" tabindex="-1"></a>hlp <span class="op">=</span> df_test.melt(</span>
+<span id="cb7-2"><a href="#cb7-2" aria-hidden="true" tabindex="-1"></a>    id_vars<span class="op">=</span>[<span class="st">"iter"</span>],</span>
+<span id="cb7-3"><a href="#cb7-3" aria-hidden="true" tabindex="-1"></a>    value_vars<span class="op">=</span>[<span class="st">"S_relax"</span>, <span class="st">"S_hat"</span>],</span>
+<span id="cb7-4"><a href="#cb7-4" aria-hidden="true" tabindex="-1"></a>    var_name<span class="op">=</span><span class="st">"metric"</span>,</span>
+<span id="cb7-5"><a href="#cb7-5" aria-hidden="true" tabindex="-1"></a>    value_name<span class="op">=</span><span class="st">"value"</span>,</span>
+<span id="cb7-6"><a href="#cb7-6" aria-hidden="true" tabindex="-1"></a>)</span>
+<span id="cb7-7"><a href="#cb7-7" aria-hidden="true" tabindex="-1"></a>sns.relplot(data<span class="op">=</span>hlp, x<span class="op">=</span><span class="st">"iter"</span>, y<span class="op">=</span><span class="st">"value"</span>, hue<span class="op">=</span><span class="st">"metric"</span>, aspect<span class="op">=</span><span class="dv">2</span>)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-display">
+<div>
+<figure class="figure">
+<p><img src="trust_region_files/figure-html/cell-7-output-1.png" width="1053" height="464" class="figure-img"></p>
+</figure>
+</div>
+</div>
+</div>
+<div id="857b809e" class="cell" data-execution_count="7">
+<div class="sourceCode cell-code" id="cb8"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb8-1"><a href="#cb8-1" aria-hidden="true" tabindex="-1"></a><span class="im">from</span> ags.relaxationmethods.trustregion <span class="im">import</span> NonConvexRelaxationPenalized</span>
+<span id="cb8-2"><a href="#cb8-2" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb8-3"><a href="#cb8-3" aria-hidden="true" tabindex="-1"></a>G <span class="op">=</span> nx.erdos_renyi_graph(n<span class="op">=</span><span class="dv">20</span>, p<span class="op">=</span><span class="fl">0.5</span>)</span>
+<span id="cb8-4"><a href="#cb8-4" aria-hidden="true" tabindex="-1"></a>instance <span class="op">=</span> GraphInstance(G)</span>
+<span id="cb8-5"><a href="#cb8-5" aria-hidden="true" tabindex="-1"></a>solver <span class="op">=</span> TrustRegionSolver(init_method<span class="op">=</span><span class="st">"random"</span>)</span>
+<span id="cb8-6"><a href="#cb8-6" aria-hidden="true" tabindex="-1"></a>solver.formulate(instance)</span>
+<span id="cb8-7"><a href="#cb8-7" aria-hidden="true" tabindex="-1"></a>cb <span class="op">=</span> CollectIterationData(instance)</span>
+<span id="cb8-8"><a href="#cb8-8" aria-hidden="true" tabindex="-1"></a>obj <span class="op">=</span> NonConvexRelaxationPenalized(instance, c<span class="op">=</span><span class="fl">0.2</span>)</span>
+<span id="cb8-9"><a href="#cb8-9" aria-hidden="true" tabindex="-1"></a>res <span class="op">=</span> solver.solve(obj, callback<span class="op">=</span>cb)</span>
+<span id="cb8-10"><a href="#cb8-10" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb8-11"><a href="#cb8-11" aria-hidden="true" tabindex="-1"></a><span class="co"># Plot data</span></span>
+<span id="cb8-12"><a href="#cb8-12" aria-hidden="true" tabindex="-1"></a>df <span class="op">=</span> cb.to_dataframe()</span>
+<span id="cb8-13"><a href="#cb8-13" aria-hidden="true" tabindex="-1"></a><span class="bu">print</span>(df)</span>
+<span id="cb8-14"><a href="#cb8-14" aria-hidden="true" tabindex="-1"></a><span class="bu">print</span>(df.iloc[<span class="op">-</span><span class="dv">1</span>][<span class="st">"P_hat"</span>])</span>
+<span id="cb8-15"><a href="#cb8-15" aria-hidden="true" tabindex="-1"></a>hlp <span class="op">=</span> df.melt(</span>
+<span id="cb8-16"><a href="#cb8-16" aria-hidden="true" tabindex="-1"></a>    id_vars<span class="op">=</span>[<span class="st">"iter"</span>],</span>
+<span id="cb8-17"><a href="#cb8-17" aria-hidden="true" tabindex="-1"></a>    value_vars<span class="op">=</span>[<span class="st">"S_relax"</span>, <span class="st">"S_hat"</span>],</span>
+<span id="cb8-18"><a href="#cb8-18" aria-hidden="true" tabindex="-1"></a>    var_name<span class="op">=</span><span class="st">"metric"</span>,</span>
+<span id="cb8-19"><a href="#cb8-19" aria-hidden="true" tabindex="-1"></a>    value_name<span class="op">=</span><span class="st">"value"</span>,</span>
+<span id="cb8-20"><a href="#cb8-20" aria-hidden="true" tabindex="-1"></a>)</span>
+<span id="cb8-21"><a href="#cb8-21" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb8-22"><a href="#cb8-22" aria-hidden="true" tabindex="-1"></a>sns.relplot(data<span class="op">=</span>hlp, x<span class="op">=</span><span class="st">"iter"</span>, y<span class="op">=</span><span class="st">"value"</span>, hue<span class="op">=</span><span class="st">"metric"</span>, aspect<span class="op">=</span><span class="dv">2</span>, kind<span class="op">=</span><span class="st">"line"</span>)</span>
+<span id="cb8-23"><a href="#cb8-23" aria-hidden="true" tabindex="-1"></a>sns.relplot(data<span class="op">=</span>df, x<span class="op">=</span><span class="st">"iter"</span>, y<span class="op">=</span><span class="st">"obj"</span>, aspect<span class="op">=</span><span class="dv">2</span>, kind<span class="op">=</span><span class="st">"line"</span>)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-stdout">
+<pre><code>The maximum number of function evaluations is exceeded.
+Number of iterations: 1000, function evaluations: 400599, CG iterations: 3351, optimality: 1.59e-02, constraint violation: 3.33e-16, execution time: 2.9e+01 s.
+     iter                                              P_hat    E_relax  \
+0       1  [11, 6, 16, 10, 2, 8, 19, 7, 9, 18, 12, 0, 3, ...  24.887375   
+1       2  [3, 7, 16, 10, 2, 12, 19, 15, 9, 14, 0, 8, 1, ...  34.636355   
+2       3  [3, 7, 16, 10, 5, 12, 19, 15, 9, 14, 0, 8, 1, ...  28.185526   
+3       4  [3, 7, 16, 10, 5, 12, 19, 15, 9, 14, 0, 8, 1, ...  23.486396   
+4       5  [3, 7, 16, 10, 5, 12, 19, 15, 9, 14, 0, 8, 1, ...  23.154878   
+..    ...                                                ...        ...   
+995   996  [3, 7, 16, 6, 2, 4, 19, 12, 9, 1, 13, 8, 15, 1...  16.211565   
+996   997  [3, 7, 16, 6, 2, 4, 19, 12, 9, 1, 13, 8, 15, 1...  16.213952   
+997   998  [3, 7, 16, 6, 2, 4, 19, 12, 9, 1, 13, 8, 15, 1...  16.216362   
+998   999  [3, 7, 16, 6, 2, 4, 19, 12, 9, 1, 13, 8, 15, 1...  16.218796   
+999  1000  [3, 7, 16, 6, 2, 4, 19, 12, 9, 1, 13, 8, 15, 1...  16.221253   
+
+      S_relax  E_hat     S_hat         obj  
+0    0.261972   42.0  0.442105 -100.100827  
+1    0.364593   37.0  0.389474 -175.234059  
+2    0.296690   40.0  0.421053 -154.660843  
+3    0.247225   40.0  0.421053 -128.807130  
+4    0.243736   40.0  0.421053  -88.283362  
+..        ...    ...       ...         ...  
+995  0.170648   23.0  0.242105 -144.998201  
+996  0.170673   23.0  0.242105 -145.000208  
+997  0.170699   23.0  0.242105 -145.002216  
+998  0.170724   23.0  0.242105 -145.004227  
+999  0.170750   23.0  0.242105 -145.006239  
+
+[1000 rows x 7 columns]
+[ 3  7 16  6  2  4 19 12  9  1 13  8 15 18 10  5 11  0 17 14]</code></pre>
+</div>
+<div class="cell-output cell-output-display">
+<div>
+<figure class="figure">
+<p><img src="trust_region_files/figure-html/cell-8-output-2.png" width="1052" height="464" class="figure-img"></p>
+</figure>
+</div>
+</div>
+<div class="cell-output cell-output-display">
+<div>
+<figure class="figure">
+<p><img src="trust_region_files/figure-html/cell-8-output-3.png" width="945" height="464" class="figure-img"></p>
+</figure>
+</div>
+</div>
+</div>
+<div id="5382aa0b" class="cell" data-execution_count="8">
+<div class="sourceCode cell-code" id="cb10"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb10-1"><a href="#cb10-1" aria-hidden="true" tabindex="-1"></a><span class="im">from</span> scipy.optimize <span class="im">import</span> approx_fprime</span>
+<span id="cb10-2"><a href="#cb10-2" aria-hidden="true" tabindex="-1"></a><span class="im">from</span> ags.relaxationmethods.trustregion <span class="im">import</span> NonConvexRelaxation</span>
+<span id="cb10-3"><a href="#cb10-3" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb10-4"><a href="#cb10-4" aria-hidden="true" tabindex="-1"></a>n <span class="op">=</span> <span class="dv">5</span></span>
+<span id="cb10-5"><a href="#cb10-5" aria-hidden="true" tabindex="-1"></a>G <span class="op">=</span> nx.erdos_renyi_graph(n, p<span class="op">=</span><span class="fl">0.5</span>)</span>
+<span id="cb10-6"><a href="#cb10-6" aria-hidden="true" tabindex="-1"></a>instance <span class="op">=</span> GraphInstance(G)</span>
+<span id="cb10-7"><a href="#cb10-7" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb10-8"><a href="#cb10-8" aria-hidden="true" tabindex="-1"></a>P0 <span class="op">=</span> np.ones((n, n)) <span class="op">/</span> n</span>
+<span id="cb10-9"><a href="#cb10-9" aria-hidden="true" tabindex="-1"></a>x0 <span class="op">=</span> P0.reshape(n <span class="op">*</span> n)</span>
+<span id="cb10-10"><a href="#cb10-10" aria-hidden="true" tabindex="-1"></a>x0</span>
+<span id="cb10-11"><a href="#cb10-11" aria-hidden="true" tabindex="-1"></a>approx_fprime(x0, NonConvexRelaxation(instance)).reshape((n, n))</span>
+<span id="cb10-12"><a href="#cb10-12" aria-hidden="true" tabindex="-1"></a>NonConvexRelaxation(instance).jacobian(P0)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="cell-output cell-output-display" data-execution_count="8">
+<pre><code>array([[-3.6, -1.2, -2.4, -3.6, -1.2],
+       [-1.2, -0.4, -0.8, -1.2, -0.4],
+       [-2.4, -0.8, -1.6, -2.4, -0.8],
+       [-3.6, -1.2, -2.4, -3.6, -1.2],
+       [-1.2, -0.4, -0.8, -1.2, -0.4]])</code></pre>
+</div>
 </div>
 
 </main>

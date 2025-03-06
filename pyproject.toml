@@ -1,25 +1,29 @@
-[tool.poetry]
-name = "approximate-graph-symmetries"
+[project]
+name = "ags"
 version = "0.1.0"
 description = ""
-authors = ["David Kubek <david.kubek@gmail.com>"]
-license = "Unlicense"
+authors = [
+    {name = "David Kubek",email = "david.kubek@gmail.com"}
+]
 readme = "README.md"
+requires-python = "^3.11"
+dependencies = [
+    "numpy (>=2.2.3,<3.0.0)",
+    "scipy (>=1.15.1,<2.0.0)",
+    "networkx (>=3.4.2,<4.0.0)"
+]
 
-[tool.poetry.dependencies]
-python = "^3.11"
-numpy = "^2.1.2"
-scipy = "^1.14.1"
-networkx = "^3.3"
+[tool.poetry]
+
+[tool.poetry.group.dev.dependencies]
+ruff = "^0.9.6"
+pylama = "^8.4.1"
+jupyter = "^1.1.1"
 pandas = "^2.2.3"
 seaborn = "^0.13.2"
-jupyter = "^1.1.1"
 pyomo = "^6.8.2"
 jax = "^0.4.35"
 
-[tool.poetry.group.dev.dependencies]
-pylama = "^8.4.1"
-
 [build-system]
-requires = ["poetry-core"]
+requires = ["poetry-core>=2.0.0,<3.0.0"]
 build-backend = "poetry.core.masonry.api"

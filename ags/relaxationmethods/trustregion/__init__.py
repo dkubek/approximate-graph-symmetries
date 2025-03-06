@@ -1,7 +1,7 @@
 import numpy as np
 import scipy as sp
 
-from approximate_graph_symmetries.relaxationmethods.utils import doubly_stochastic
+from ags.relaxationmethods.utils import doubly_stochastic
 
 from scipy.optimize import Bounds
 from scipy.optimize import LinearConstraint
@@ -15,10 +15,10 @@ class ObjectiveFunction:
     def __call__(self, *args, **kwargs):
         raise NotImplementedError("Objective function call not implemented")
 
-    def jacobian(self):
+    def jacobian(self, *args, **kwargs):
         raise NotImplementedError("Jacobian not defined")
 
-    def hessian(self):
+    def hessian(self, *args, **kwargs):
         raise NotImplementedError("Hessian not defined")
 
 
@@ -28,6 +28,16 @@ class NonConvexRelaxation(ObjectiveFunction):
         A = self._instance.adjacency
         P = x.reshape(n, n)
         return -np.trace(A @ P @ A.T @ P.T)
+
+    def jacobian(self, x: np.ndarray):
+        n = self._instance.n
+        A = self._instance.adjacency
+        P = x.reshape(n, n)
+        return (-A @ P @ A.T - A.T @ P @ A).reshape(n * n)
+
+    def hessian(self, x: np.ndarray):
+        A = self._instance.adjacency
+        return -np.kron(A, A) - np.kron(A.T, A.T)
 
 
 class NonConvexRelaxationPenalized(ObjectiveFunction):
@@ -41,6 +51,16 @@ class NonConvexRelaxationPenalized(ObjectiveFunction):
         A = self._instance.adjacency
         P = x.reshape(n, n)
         return -np.trace(A @ P @ A.T @ P.T - self.c_mat @ P)
+
+    def jacobian(self, x: np.ndarray):
+        n = self._instance.n
+        A = self._instance.adjacency
+        P = x.reshape(n, n)
+        return (-A @ P @ A.T - A.T @ P @ A + self.c_mat).reshape(n * n)
+
+    def hessian(self, x: np.ndarray):
+        A = self._instance.adjacency
+        return -np.kron(A, A) - np.kron(A.T, A.T)
 
 
 class DynamicFixedPointsGMP(ObjectiveFunction):
@@ -58,6 +78,8 @@ class DynamicFixedPointsGMP(ObjectiveFunction):
 
         return E / (n * (n - 1) - 2 * F * (F - 1))
 
+    jacobian = None
+    hessian = None
 
 class TrustRegionSolver:
 
@@ -125,7 +147,7 @@ class TrustRegionSolver:
         else:
             raise NotImplementedError()
 
-    def solve(self, obj, callback=None):
+    def solve(self, obj : ObjectiveFunction, callback=None):
         assert self._formulated
 
         linear_constraints = LinearConstraint(
@@ -139,6 +161,8 @@ class TrustRegionSolver:
         res = minimize(
             obj,
             x_0,
+            jac=obj.jacobian,
+            hess=obj.hessian,
             method="trust-constr",
             constraints=[linear_constraints],
             bounds=variable_bounds,
