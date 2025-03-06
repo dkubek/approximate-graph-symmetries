@@ -199,27 +199,32 @@ Returns a sparse matrix for memory efficiency.
 """
 function dvecPdπ(π::Vector{T}, df::Function, n::Integer) where T<:Real
     # Pre-allocate arrays for sparse matrix construction
-    """
 	rows = Int[]
     cols = Int[]
     vals = T[]
     
-    for i in 1:n
+    # for i in 1:n
+    #    for j in 1:n
+    #        for k in 1:n
+    #            if i == k
+    #                push!(rows, (j-1)*n + i)
+    #                push!(cols, k)
+    #                push!(vals, df(π[k] - j))
+    #            end
+    #        end
+    #    end
+    #end
+	for i in 1:n
         for j in 1:n
-            for k in 1:n
-                if i == k
-                    push!(rows, (i-1)*n + j)
-                    push!(cols, k)
-                    push!(vals, df(π[k] - j))
-                end
-            end
+			push!(rows, (j-1)*n + i)
+			push!(cols, i)
+			push!(vals, df(π[i] - j))
         end
     end
     
     return sparse(rows, cols, vals, n*n, n)
-	"""
 
-	hcat([diagm(df.(π .- i)) for i in 1:n]...)
+	# hcat([diagm(df.(π .- i)) for i in 1:n]...)
 end
 
 # ╔═╡ 293b0b45-1e62-492b-be49-2fa77e847a81
@@ -246,10 +251,12 @@ begin
 	    _HG = -2 * LazyArrays.Kron(A, A)
 	    
 	    # First term: dvecPdπ * HG * dvecPdπ'
-	    term1 = _dvecPdπ * _HG * _dvecPdπ'
+	    term1 = _dvecPdπ' * _HG * _dvecPdπ
 	    
 	    # Use precomputed term2 directly
 	    return term1 + precomputed_term2
+
+		
 	end
 	
 	"""
@@ -258,24 +265,21 @@ begin
 	Calculate an element of the Hessian of P with respect to π.
 	Uses sparsity pattern for efficiency.
 	"""
-	function H_elem(π::Vector{T}, i::Integer, j::Integer, d2f::Function, n::Integer) where T<:Real
-		"""
-	    H = spzeros(T, n*n, n*n)
+	function H_elem(π::Vector{T}, k::Integer, l::Integer, d2f::Function, n::Integer) where T<:Real
+		rows = Int[]
+	    cols = Int[]
+	    vals = T[]
 	    
-	    if i == j
-	        for k in 1:n
-	            idx = (i-1)*n + k
-	            H[idx, idx] = d2f(π[i] - k)
+		# i == k == l
+	    if k == l
+	        for j in 1:n
+				push!(rows, k) # i == k
+				push!(cols, j)
+	            push!(vals, d2f(π[k] - j))
 	        end
 	    end
 			    
-	    return H
-		"""
-		[ 
-		(j == i == k) ? d2f(π[k] - l) : 0 
-			for k in 1:n, l in 1:n
-		]
-
+	    return sparse(rows, cols, vals, n, n)
 	end
 	
 	"""
@@ -287,15 +291,14 @@ begin
 	function precompute_hessian_term2(A::Matrix{T}, π::Vector{T}, f::Function, d2f::Function, n::Integer) where T<:Real
 	    P_matrix = P(π, f, n)
 	    _dGdP = dGdP(A, P_matrix)
-	    
+
 	    term2 = zeros(T, n, n)
-	    for i in 1:n
-	        for j in 1:n
-	            if i == j  # Exploit sparsity pattern
-	                H_ij = H_elem(π, i, j, d2f, n)
-	                term2[i, j] = sum(_dGdP .* H_ij)
-	            end
-	        end
+		# for i in 1:n, j in 1:n, k in 1:n, l in 1:n
+		# nonzero only for k == l
+		# 
+	    for k in 1:n
+			H_kl = H_elem(π, k, k, d2f, n)
+			term2[k, k] = sum(_dGdP .* H_kl)
 	    end
 	    
 	    return term2
@@ -315,6 +318,9 @@ begin
 		p = [1.4, 2.8, 1.7, 3.9]
 end
 
+# ╔═╡ 774a09f4-7ef0-45c1-925f-ec9baa837cea
+dvecPdπ(p, periodic(x -> irwin_hall_3_derivative(x + 3/2), n), n)
+
 # ╔═╡ e435156d-bd87-45ca-8d01-a723326dcc0e
 begin
 	using Plots
@@ -333,15 +339,15 @@ typeof(p)
 # ╔═╡ dcab1607-b13e-4bd3-bfd7-200a24b0b92f
 dvecPdπ(p, periodic(x -> irwin_hall_3_derivative(x + 3/2), n), n)' |> collect
 
-# ╔═╡ 0a16d1b8-ea8f-4f63-8ef4-dede0b184bd0
-
-
 # ╔═╡ e912f13b-59f7-4dd8-b802-8a8eaf8db755
 begin
 	Pp = P(p, periodic(x -> irwin_hall_3(x + 3/2), n), n)
 	v = dvecPdπ(p, periodic(x -> irwin_hall_3_derivative(x + 3/2), n), n)
-	vec(dGdP(A, Pp))' * v'
+	vec(dGdP(A, Pp))' * v
 end
+
+# ╔═╡ 609998b7-834a-494f-ae1a-df1f0b23fe30
+v
 
 # ╔═╡ ac4bfffa-54f0-4635-af41-8a4b192152ca
 begin
@@ -2164,6 +2170,7 @@ version = "1.4.1+2"
 # ╠═33783c65-92f4-428a-a619-5f2c701c0e23
 # ╠═a2a5a2da-5a06-4d03-899b-2d50676ecad5
 # ╠═f731520a-7e50-4949-a67c-d7094dacaa2f
+# ╠═774a09f4-7ef0-45c1-925f-ec9baa837cea
 # ╠═293b0b45-1e62-492b-be49-2fa77e847a81
 # ╠═59a251e0-8844-41bb-a794-d052b5764f73
 # ╠═e435156d-bd87-45ca-8d01-a723326dcc0e
@@ -2171,8 +2178,8 @@ version = "1.4.1+2"
 # ╠═20c3d381-3a4b-43d7-8f11-d710d5ad5b53
 # ╠═0d9d7921-5ace-4c0a-8348-f48f2a911541
 # ╠═dcab1607-b13e-4bd3-bfd7-200a24b0b92f
-# ╠═0a16d1b8-ea8f-4f63-8ef4-dede0b184bd0
 # ╠═e912f13b-59f7-4dd8-b802-8a8eaf8db755
+# ╠═609998b7-834a-494f-ae1a-df1f0b23fe30
 # ╠═ac4bfffa-54f0-4635-af41-8a4b192152ca
 # ╠═48a490b5-3036-40ec-b420-4ce0c86d5e89
 # ╠═77742a50-c2a2-4770-b731-39ee484b01db
