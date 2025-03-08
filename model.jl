@@ -12,7 +12,8 @@ begin
 	using SparseArrays
 	using LazyArrays
 
-	using Zygote
+	using Plots
+	# theme(:ggplot2)  # Use the ggplot2 theme
 end
 
 # ╔═╡ 9f972bc2-4405-4abd-af23-2669855c1e2b
@@ -75,13 +76,175 @@ begin
 	end
 end
 
+# ╔═╡ 46dd04c1-3c53-4d24-a061-39e9fc7bb713
+begin
+	n = 4
+
+	A = Matrix{Float64}([
+		0  1  0  1
+		1  1  0  1
+		0  0  1  0
+		1  1  0  0
+	])
+	p = [1.4, 2.8, 1.7, 3.9]
+end
+
+# ╔═╡ 4e7810e7-a1f7-4500-9f7d-9f5aea6ae69e
+md"""
+# Relaxed Definitions Permutations
+"""
+
+# ╔═╡ b0be28d0-c53d-4f74-9b3a-951d05d1a016
+md"""
+
+We want to represent a constraint
+
+```math
+\pi \in S_n
+```
+
+Using integer programming we could formulate this constraint as
+
+```math
+\begin{align}
+(\forall i \neq j)\; \pi_i \neq \pi_j \\
+\pi \in \{1, 2, \ldots, n\}
+\end{align}
+```
+
+**TODO**
+"""
+
+# ╔═╡ f53cd2d2-b08e-4017-8c14-05bb949ddee2
+md"""
+Suppose $\pi \in \mathbb{R}^n$ is a permutation. How to reconstruct the permutation matrix?
+
+One approach would be to create a function
+```math
+f_i(x) = 
+\begin{cases}
+1 & x = n \\
+0 & \text{otherwise}
+\end{cases}
+```
+
+The permutation matrix could then be constructed as
+```math
+P 
+= ( f_j(\pi_i) )_{ij}
+=
+\begin{pmatrix}
+f_1(\pi_1) & f_2(\pi_1) & \cdots & f_n(\pi_1) \\
+f_1(\pi_2) & f_2(\pi_2) & \cdots & f_n(\pi_2) \\
+\vdots & \ddots && \vdots \\
+f_1(\pi_n) & f_2(\pi_n) & \cdots & f_n(\pi_n) \\
+\end{pmatrix}
+=
+\begin{pmatrix}
+| & | &  & | \\
+f_1(\pi) & f_2(\pi) & \cdots & f_n(\pi) \\
+| & | &  & | \\
+\end{pmatrix}
+```
+"""
+
+# ╔═╡ f7b38a1d-da6f-41c0-bff3-48ec8aa2940c
+let
+	f(x) = (x == 0) ? 1 : 0
+
+	p = plot(layout=(n, 1), xlims=[0, n + 1], ylims = [0, 1.5])
+
+	for i in 1:n
+		plot!(p[i], x -> f(x - i), label="f_$i")
+		scatter!(p[i], [i], [1], markersize=2,color=:blue, label=nothing)
+	end
+	p
+end
+
+# ╔═╡ dfe3e0c7-c65e-47c9-8362-37e0ce3d555d
+let
+	f(x) = (x == 0) ? 1 : 0
+	π = [3, 1, 4, 2]
+	[f(π[i] - j) for i = 1:n, j = 1:n ]
+end
+
+# ╔═╡ e9399db5-cd3e-4d15-9b39-e81c121c475d
+md"""
+However, using this function fails, if we consider a "relaxed" permutation $\tilde{\pi} \in \mathbb{R}^n$, since we would obtain a zero matrix in most cases as it is unlikely that the elements will be integers.
+"""
+
+# ╔═╡ b5e6dc4c-58b5-4f93-88fd-5faf47eac6dc
+let
+	f(x) = (x == 0) ? 1 : 0
+	[f(p[i] - j) for i = 1:n, j = 1:n ]
+end
+
+# ╔═╡ dfe481fd-f10e-4458-bfcb-d6b32f025f79
+md"""
+What we can do instead. Is that we assume the element $\tilde{\pi}_i$ is some weighted combination of possible integral values around it.
+
+For example, suppose $\tilde{\pi}_i = 1.4$. We can think about it that this value represents the idea that the real value is either 1 or 2, but more likely (or skewed) to be 1 than 2.
+
+We could express this idea as a convex combination $1.4 = 0.6 \cdot 1 + 0.4 \cdot 2$
+
+We can model this by using the functions
+
+```math
+{\displaystyle f_i(x)= f(x - i)}
+```
+where
+```math
+f(x)=
+\begin{cases}
+x + 1 & -1 \leq x \leq 0 \\
+1 - x & 0 \leq x \leq 1 \\
+0 & \text{otherwise}
+\end{cases}
+```
+"""
+
+# ╔═╡ 0ab716c2-0c36-44ec-8aa7-60b275a936b8
+let
+	function f(x)
+	    if -1 <= x <= 0
+	        return x + 1
+		elseif 0 <= x <= 1
+			return 1 - x
+	    else
+	        0
+	    end
+	end 
+
+	p = plot(layout=(n, 1), xlims=[0, n + 1], ylims = [0, 1.5])
+
+	for i in 1:n
+		plot!(p[i], x -> f(x - i), label="f_$i")
+		vline!(p[i], [1, n], label=nothing, color=:black)
+	end
+	p
+end
+
+# ╔═╡ 33557962-738e-4b59-b671-bef07aa3f6e0
+md"""
+However, this function is not differentiable at all points. This is not good since we would like to use gradient based optimization methods.
+
+Notice, that the function $f_i$ can be thought of as a shifted version of the *triangular distribution*. This distribution can be generalized into so called [*Irwin-Hall distribution*](https://www.wikiwand.com/en/articles/Irwin%E2%80%93Hall_distribution).
+
+If we take the shifted version of the Irwin-Hall distribution for k=3, we obtain a "smoothed" version of the triangular distribution.
+
+```math
+{\displaystyle f(x)={\begin{cases}{\frac {1}{2}}x^{2}&0\leq x\leq 1\\{\frac {1}{2}}(-2x^{2}+6x-3)&1\leq x\leq 2\\{\frac {1}{2}}(3-x)^{2}&2\leq x\leq 3 \\
+0 & \text{otherwise}
+\end{cases}}}
+```
+
+This function is a spline and is continously differentiable.
+"""
+
 # ╔═╡ 6d482735-8577-4d36-b549-7a65244198a2
 
 """
     irwin_hall_3(x::T) where T<:Real
-
-Piecewise quadratic function with domain [0,3].
-Type-stable implementation that maintains the same return type as the input.
 """
 function irwin_hall_3(x::T) where T<:Real
     if x < zero(T)
@@ -101,8 +264,7 @@ end
 """
     irwin_hall_3_derivative(x::T) where T<:Real
 
-First derivative of the irwin_hall_3 function.
-Type-stable implementation with smooth transitions at boundary points.
+First derivative of the `irwin_hall_3` function.
 """
 function irwin_hall_3_derivative(x::T) where T<:Real
     if x < zero(T)
@@ -122,7 +284,7 @@ end
 """
     irwin_hall_3_hessian(x::T) where T<:Real
 
-Second derivative of the irwin_hall_3 function.
+Second derivative of the `irwin_hall_3` function.
 """
 function irwin_hall_3_hessian(x::T) where T<:Real
     if x < zero(T)
@@ -138,57 +300,165 @@ function irwin_hall_3_hessian(x::T) where T<:Real
     end
 end
 
+# ╔═╡ cc487ee9-601e-4991-961e-fb5cc347182b
+let
+	function f(x)
+	    if -1.5 ≤ x ≤ -0.5
+	        return 0.5*x^2 + 1.5*x + 1.125
+	    elseif -0.5 ≤ x ≤ 0.5
+	        return -1.0*x^2 + 0.75
+	    elseif 0.5 ≤ x ≤ 1.5
+	        return 0.5*x^2 - 1.5*x + 1.125
+	    else
+	        return 0
+	    end
+	end
+
+	p = plot(layout=(n, 1), xlims=[0, n + 1], ylims = [0, 1.5])
+
+	for i in 1:n
+		plot!(p[i], x -> f(x - i), label="f_$i")
+		vline!(p[i], [1, n], label=nothing, color=:black)
+	end
+	p
+end
+
+# ╔═╡ 24df4924-bf5c-4ffe-8b27-19f0f67115fa
+md"""
+However, there is clipping of the function at the edges, so additionally, we make it periodic.
+"""
+
 # ╔═╡ 435ce43a-d531-48e1-a465-dd8a0844a2cf
 """
     periodic(f::Function, period::Integer)
 
 Create a periodic version of function f with given period.
-Uses function composition for better performance than repeated function calls.
 """
 function periodic(f::Function, period::Integer)
+	# Enough for our use case to repeat 3 times
     return x -> f(x + period) + f(x) + f(x - period)
 end
 
+# ╔═╡ 73bb6329-063d-47f0-bcbc-8c0d1f8a1631
+begin
+	# Create the periodic functions
+	f = periodic(x -> irwin_hall_3(x + 3/2), n)
+	df = periodic(x -> irwin_hall_3_derivative(x + 3/2), n)
+	d2f = periodic(x -> irwin_hall_3_hessian(x + 3/2), n)
+end
+
+# ╔═╡ 0592a253-a759-4ea6-ae1b-1aba8a0725ce
+let
+	p = plot(layout=(n, 1), xlims=[0, n + 1], ylims = [0, 1.5])
+
+	for i in 1:n
+		plot!(p[i], x -> f(x - i), label="f_$i")
+		vline!(p[i], [1, n], label=nothing, color=:black)
+	end
+	p
+end
+
+# ╔═╡ a1d7ece9-0e6d-40be-82f9-a06a2cecbd0b
+let
+	p = plot(xaxis = [-4, 4], title="f, f', f''")
+	plot!(p, f, label="f")
+	plot!(p, df, label="f'")
+	plot!(p, d2f, label="f''")
+	p
+end
+
+# ╔═╡ 0fdbe7aa-6006-4543-a273-3fb2027df420
+md"""
+# Approximate Symmetry
+"""
+
+# ╔═╡ 6381946b-49fd-4541-aaab-5e58915aa984
+md"""
+We are solving the problem
+
+**Approximate Symmetry Problem (ASP)**
+
+*Input:* A graph $G$ having adjacency matrix $A$ and a (vector) constant $c \in \mathbb{R}^3$.
+    
+```math
+\begin{equation*}
+	\min_{P \in \mathcal{P}_n} -\mathrm{tr}(A P A^T P^T - \mathrm{diag}(c) P)
+\end{equation*}
+```
+"""
+
 # ╔═╡ bdc2bde2-917f-4ec2-9043-8b40d68377ac
 """
-    P(π::Vector{T}, f::Function, n::Integer) where T<:Real
+    P(π::Vector{T}) where T<:Real
 
 Construct permutation matrix P from vector π using function f.
-Pre-allocates the matrix for better performance.
 """
-function P(π::Vector{T}, f::Function, n::Integer) where T<:Real
-    P_matrix = Matrix{T}(undef, n, n)
+function P(π::Vector{T}) where T<:Real
+	n = size(π, 1)
+    P_result = Matrix{T}(undef, n, n)
     for i in 1:n
         for j in 1:n
-            @inbounds P_matrix[i,j] = f(π[i] - j)
+            @inbounds P_result[i,j] = f(π[i] - j)
         end
     end
-    return P_matrix
+    return P_result
+end
+
+# ╔═╡ f8a80a32-7d76-4cbb-b317-275efceba2f5
+"""
+    P(P::π::Vector{T}) where T<:Real
+
+Construct permutation matrix P from vector π using function f and save the result into P.
+"""
+function P!(P_result::Matrix{T}, π::Vector{T}) where T<:Real
+	n = size(π, 1)
+    for i in 1:n, j in 1:n
+    	@inbounds P_result[i,j] = f(π[i] - j)
+    end
+    return P_result
 end
 
 # ╔═╡ 33783c65-92f4-428a-a619-5f2c701c0e23
-"""
-    G(A::Matrix{T}, P::Matrix{T}) where T<:Real
+begin
+	function F(A::Matrix{T}, P::Matrix{T}) where T<:Real
+		return -tr(A * P * A' * P')
+	end
 
-Calculate G(A,P) = -tr(A * P * A' * P')
-"""
-function G(A::Matrix{T}, P::Matrix{T}) where T<:Real
-    # Use A'P' = (PA)' to reduce one transpose operation
-    # Calculate AP first, then (AP)(AP)' to reduce number of matrix multiplications
-    AP = A * P
-    return -tr(AP * AP')
+	"""
+	    G(A::Matrix{T}, P::Matrix{T}) where T<:Real
+	
+	Calculate G(A,P) = -tr(A * P * A' * P') + diag(c) * P
+	"""
+	function F(A::Matrix{T}, P::Matrix{T}, c::Vector{T}) where T<:Real
+		return -tr(A * P * A' * P') + diag(c) * P
+	end
+	
 end
 
-# ╔═╡ a2a5a2da-5a06-4d03-899b-2d50676ecad5
-"""
-    F(A::Matrix{T}, π::Vector{T}, f::Function, n::Integer) where T<:Real
+# ╔═╡ 19745ff7-e06a-4add-9e2c-05945d2920e3
+md"""
+# Derivatives
 
-Calculate F(A,π) = G(A,P(π))
+Throughout, we are using [Numerator Layout](https://www.wikiwand.com/en/articles/Matrix_calculus#Numerator-layout_notation) and [Einstein notation](https://www.wikiwand.com/en/articles/Einstein_notation) (loosely)
 """
-function F(A::Matrix{T}, π::Vector{T}, f::Function, n::Integer) where T<:Real
-    P_matrix = P(π, f, n)
-    return G(A, P_matrix)
-end
+
+# ╔═╡ 0a9f5275-0edb-408c-b082-2e41102b6341
+md"""
+## Gradient
+"""
+
+# ╔═╡ 78a81278-1f3f-4649-aea0-154bd5430eba
+md"""
+We split the computation of the gradient of F w.r.t. to P of
+```math
+G(A, π) 
+= F(A, P(π))
+= -\mathrm{tr}(A P A^T P^T) + \mathrm{diag}(c) P
+```
+
+```math
+```
+"""
 
 # ╔═╡ f731520a-7e50-4949-a67c-d7094dacaa2f
 """
@@ -197,7 +467,8 @@ end
 Calculate the Jacobian of vec(P) with respect to π.
 Returns a sparse matrix for memory efficiency.
 """
-function dvecPdπ(π::Vector{T}, df::Function, n::Integer) where T<:Real
+function dvecPdπ(π::Vector{T}) where T<:Real
+	n = size(π, 1)
     # Pre-allocate arrays for sparse matrix construction
 	rows = Int[]
     cols = Int[]
@@ -245,16 +516,18 @@ begin
 	Calculate the Hessian of F with respect to π.
 	Uses precomputed constant term2 for improved performance.
 	"""
-	function HFdpdp(A::Matrix{T}, π::Vector{T}, f::Function, df::Function, precomputed_term2::Matrix{T}, n::Integer) where T<:Real
-	    P_matrix = P(π, f, n)
-	    _dvecPdπ = dvecPdπ(π, df, n)
+	function HFdpdp(A::Matrix{T}, π::Vector{T}, term2::Matrix{T}) where T<:Real
+	    n = size(π, 1)
+		
+		P_matrix = P(π)
+	    _dvecPdπ = dvecPdπ(π)
 	    _HG = -2 * LazyArrays.Kron(A, A)
 	    
 	    # First term: dvecPdπ * HG * dvecPdπ'
 	    term1 = _dvecPdπ' * _HG * _dvecPdπ
 	    
 	    # Use precomputed term2 directly
-	    return term1 + precomputed_term2
+	    return term1 + term2
 
 		
 	end
@@ -265,7 +538,9 @@ begin
 	Calculate an element of the Hessian of P with respect to π.
 	Uses sparsity pattern for efficiency.
 	"""
-	function H_elem(π::Vector{T}, k::Integer, l::Integer, d2f::Function, n::Integer) where T<:Real
+	function H_elem(π::Vector{T}, k::Integer, l::Integer) where T<:Real
+		n = size(π, 1)
+		
 		rows = Int[]
 	    cols = Int[]
 	    vals = T[]
@@ -288,8 +563,9 @@ begin
 	Precompute the constant second term of the Hessian matrix.
 	This term remains constant throughout optimization when using the original irwin_hall_3 function.
 	"""
-	function precompute_hessian_term2(A::Matrix{T}, π::Vector{T}, f::Function, d2f::Function, n::Integer) where T<:Real
-	    P_matrix = P(π, f, n)
+	function precompute_hessian_term2(A::Matrix{T}, π::Vector{T}) where T<:Real
+	    n = size(π, 1)
+		P_matrix = P(π)
 	    _dGdP = dGdP(A, P_matrix)
 
 	    term2 = zeros(T, n, n)
@@ -297,7 +573,7 @@ begin
 		# nonzero only for k == l
 		# 
 	    for k in 1:n
-			H_kl = H_elem(π, k, k, d2f, n)
+			H_kl = H_elem(π, k, k)
 			term2[k, k] = sum(_dGdP .* H_kl)
 	    end
 	    
@@ -305,109 +581,55 @@ begin
 	end
 end
 
-# ╔═╡ 6a935e16-c20b-481b-aeed-971a2fd2a302
-begin
-		n = 4
-	
-		A = Matrix{Float64}([
-			0  1  0  1
-	 		1  1  0  1
-	 		0  0  1  0
-	 		1  1  0  0
-		])
-		p = [1.4, 2.8, 1.7, 3.9]
-end
-
-# ╔═╡ 774a09f4-7ef0-45c1-925f-ec9baa837cea
-dvecPdπ(p, periodic(x -> irwin_hall_3_derivative(x + 3/2), n), n)
-
-# ╔═╡ e435156d-bd87-45ca-8d01-a723326dcc0e
-begin
-	using Plots
-
-	plot(periodic(x -> irwin_hall_3(x + 3/2), n))
-	plot!(periodic(x -> irwin_hall_3_derivative(x + 3/2), n))
-	plot!(periodic(x -> irwin_hall_3_hessian(x + 3/2), n))
+# ╔═╡ b774decc-a6b1-4deb-b8c4-05bc45a9a593
+function dFdp(A::Matrix, π::Vector)
+    vec(dGdP(A, P(p)))' * dvecPdπ(p)
 end
 
 # ╔═╡ 20c3d381-3a4b-43d7-8f11-d710d5ad5b53
-F(A, p, periodic(x -> irwin_hall_3(x + 3/2), n), n)
-
-# ╔═╡ 0d9d7921-5ace-4c0a-8348-f48f2a911541
-typeof(p)
+F(A, p)
 
 # ╔═╡ dcab1607-b13e-4bd3-bfd7-200a24b0b92f
-dvecPdπ(p, periodic(x -> irwin_hall_3_derivative(x + 3/2), n), n)' |> collect
+dvecPdπ(p)'
 
 # ╔═╡ e912f13b-59f7-4dd8-b802-8a8eaf8db755
-begin
-	Pp = P(p, periodic(x -> irwin_hall_3(x + 3/2), n), n)
-	v = dvecPdπ(p, periodic(x -> irwin_hall_3_derivative(x + 3/2), n), n)
-	vec(dGdP(A, Pp))' * v
-end
-
-# ╔═╡ 609998b7-834a-494f-ae1a-df1f0b23fe30
-v
-
-# ╔═╡ ac4bfffa-54f0-4635-af41-8a4b192152ca
-begin
-	    f = periodic(x -> irwin_hall_3(x + 3/2), n)
-	    df = periodic(x -> irwin_hall_3_derivative(x + 3/2), n)
-	    d2f = periodic(x -> irwin_hall_3_hessian(x + 3/2), n)
+begin 
+	vec(dGdP(A, P(p)))' * dvecPdπ(p)
 end
 
 # ╔═╡ 48a490b5-3036-40ec-b420-4ce0c86d5e89
-term2 = precompute_hessian_term2(
-	A,
-	p,
-	f,
-	d2f,
-	n
-)
-
-# ╔═╡ 77742a50-c2a2-4770-b731-39ee484b01db
-P_matrix =P(p, f, n)
+term2 = precompute_hessian_term2(A, p)
 
 # ╔═╡ 060d7b07-8f4b-40a3-b2c2-aebde3cb40ff
-_dGdP = dGdP(A, P_matrix)
+_dGdP = dGdP(A, P(p))
 
 # ╔═╡ 16aa7807-d0ca-41b6-84b2-59f47eb18fc8
-H_ij = H_elem(p, 1, 1, d2f, n)
+H_ij = H_elem(p, 1, 1)
 
 # ╔═╡ d62d2ac1-6e88-4083-af50-3a206ed14418
-HFdpdp(
-	A,
-	p,
-	periodic(x -> irwin_hall_3(x + 3/2), n),
-	periodic(x -> irwin_hall_3_derivative(x + 3/2), n),
-	term2,
-	n
-)
+HFdpdp(A, p, term2)
 
 # ╔═╡ e9702fca-1a93-4ca8-9c8a-51374cf9cf88
 """
-    approximate_symmetry(A::Matrix{T}, n::Integer; 
+    approximate_symmetry(A::Matrix{T}; 
                          max_iter::Integer=1000, 
                          tol::Float64=1e-8) where T<:Real
 
 Find a permutation vector that minimizes F(A,π).
-Implements the complete IPOPT solution with manual derivatives and
+Implements the IPOPT solution with manual derivatives and
 precomputed constant Hessian term for enhanced performance.
 """
-function approximate_symmetry(A::Matrix{T}, n::Integer; 
+function approximate_symmetry(A::Matrix{T}; 
                              max_iter::Integer=1000, 
                              tol::Float64=1e-8) where T<:Real
-    # Create the periodic functions
-    f = periodic(x -> irwin_hall_3(x + 3/2), n)
-    df = periodic(x -> irwin_hall_3_derivative(x + 3/2), n)
-    d2f = periodic(x -> irwin_hall_3_hessian(x + 3/2), n)
+    # Get matrix dimension
+    n = size(A, 1)
     
-    # Initial point for precomputation
-    initial_p = collect(T, 1:n)
+    # Initial point - following the approach in model.jl
+    p0 = ones(T, n) * sqrt((n + 1) * (2*n + 1) / 6)
     
     # Precompute the constant term2 of the Hessian
-    # This is a significant optimization since this term doesn't change during iterations
-    precomputed_term2 = precompute_hessian_term2(A, initial_p, f, d2f, n)
+    constant_term = precompute_hessian_term2(A, p0)
     
     # Create JuMP model with IPOPT solver
     model = Model(Ipopt.Optimizer)
@@ -419,124 +641,416 @@ function approximate_symmetry(A::Matrix{T}, n::Integer;
     set_optimizer_attribute(model, "linear_solver", "ma57")  # If available
     set_optimizer_attribute(model, "print_level", 3)
     
-    # Define variables with bounds
-    @variable(model, n >= p[i=1:n] >= 1.0, start = i)
+	# (relaxed) p is a permutation
+    @variable(model, n >= p[i=1:n] >= 1.0, start = p0[i])
+    @constraint(model, dot(p, p) == n*(n+1)*(2*n+1)/6)
     
-    # Register our custom functions for use in JuMP
-    register(model, :irwin_hall_3, 1, irwin_hall_3, irwin_hall_3_derivative, irwin_hall_3_hessian)
+    register(model, :F, 2, F, autodiff=true)
+
+    # Set the objective to minimize -trace
+    @NLobjective(model, Min, F(A, p))
     
-    # Define our objective directly using JuMP expressions
-    # Since we can't directly register the complex F function, we'll expand its definition here
-    P_expr = @NLexpression(model, [i=1:n, j=1:n], irwin_hall_3(p[i] - j + 3/2))
-    
-    # Create a nonlinear expression for G(A, P)
-    # This expands the trace expression: -tr(A * P * A' * P')
-    G_expr = @NLexpression(model, 
-        -sum(sum(sum(sum(
-            A[i,k] * P_expr[k,l] * A[j,m] * P_expr[m,l]
-            for l=1:n) for m=1:n) for k=1:n) for i=1:n, j=1:n)
-    )
-    
-    # Set the objective to minimize G
-    @NLobjective(model, Min, G_expr)
-    
-    # Distance constraints: every two elements must be at least 1.0 apart
-    for i in 1:n
-        for j in i+1:n
-            @NLconstraint(model, (p[i] - p[j])^2 >= 1.0)
-        end
-    end
-    
-    # Sum of squares constraint (permutation property)
-    @NLconstraint(model, sum(p[i]^2 for i in 1:n) == n*(n+1)*(2*n+1)/6)
-    
-    # Now we'll use the correct approach for providing a Hessian to IPOPT
-    # First, define the Hessian sparsity structure
-    hessian_sparsity = Tuple{Int,Int}[]
-    for i in 1:n
-        for j in 1:i  # Lower triangular part only (symmetric matrix)
-            push!(hessian_sparsity, (i, j))
-        end
-    end
-    
-    # Set up a function to evaluate the Hessian at a point (x, obj_factor, lambda)
-    function eval_hessian(H, x, obj_factor, lambda)
-        # Calculate the full Hessian matrix
-        hess_obj = HFdpdp(A, x, f, df, precomputed_term2, n)
-        
-        # We need to copy values to H in the correct order based on sparsity pattern
-        idx = 1
-        for i in 1:n
-            for j in 1:i  # lower triangular part only
-                # Objective contribution
-                H[idx] = obj_factor * hess_obj[i, j]
-                
-                # Add constraint contributions
-                constraint_idx = 0
-                
-                # Distance constraints: (p[i] - p[j])^2 >= 1.0
-                for k in 1:n
-                    for l in k+1:n
-                        constraint_idx += 1
-                        if (i == k && j == k) || (i == l && j == l)
-                            # Diagonal entries ∂²/∂p_i² or ∂²/∂p_j²
-                            H[idx] += lambda[constraint_idx] * 2.0
-                        elseif (i == k && j == l) || (i == l && j == k)
-                            # Cross-terms ∂²/∂p_i∂p_j
-                            H[idx] -= lambda[constraint_idx] * 2.0
-                        end
-                    end
-                end
-                
-                # Sum of squares constraint: sum(p[i]^2) == n*(n+1)*(2*n+1)/6
-                if i == j  # Only diagonal entries have non-zero second derivatives
-                    H[idx] += lambda[end] * 2.0
-                end
-                
-                idx += 1
-            end
-        end
-        
-        return H
-    end
-    
-    # Set the Hessian structure and evaluation callback
-    MOI.set(model, MOI.HessianLagrangianStructure(), hessian_sparsity)
-    MOI.set(model, MOI.HessianLagrangian(), eval_hessian)
-	
 	model
 end
 
-# ╔═╡ 666a0444-69aa-40b1-b984-7057240957ba
-let
+# ╔═╡ 527799b7-7e50-4483-8b1e-c0d861b2946f
+begin
 	instance = Instance(
 		"ER",
 		"data/pidnebesna/ER/ER_nNodes20_density40.npz",
 		20
 	)
-	A = load_instance_data(instance)["1"]
-	
-	approximate_symmetry(A, instance.n)
-	
-	
-	# Record time for performance measurement
-    start_time = time()
-    optimize!(model)
-    end_time = time()
-    
-    # Return results
-    status = termination_status(model)
-    p_opt = value.(p)
-    obj_val = objective_value(model)
+	B = load_instance_data(instance)["1"]
 end
-
-# ╔═╡ dfd55a15-95da-40d1-bbf0-bd9800bdaf43
-MOI.eval_hessian_lagrangian
 
 # ╔═╡ d901a80d-5fa0-4599-8fae-45d8dcd7ef00
 md"""
 ---
 """
+
+# ╔═╡ a5591c79-1672-408b-bc53-b59b377c4ad8
+begin
+	# Structure to hold pre-allocated buffers for calculations
+	mutable struct MatrixBuffers{T}
+	    P_matrix::Matrix{T}       # Buffer for permutation matrix
+	    X_matrix::Matrix{T}       # Buffer for A*P result
+	    grad_buffer::Vector{T}    # Buffer for gradient calculation
+	    hess_buffer::Vector{T}    # Buffer for Hessian values
+	    dP_di::Matrix{T}          # Buffer for ∂P/∂πᵢ
+	    dP_dj::Matrix{T}          # Buffer for ∂P/∂πⱼ
+	    d2P_didj::Matrix{T}       # Buffer for ∂²P/∂πᵢ∂πⱼ
+	    temp_matrix::Matrix{T}    # General purpose temporary matrix
+	    
+	    function MatrixBuffers(n::Int, T::DataType=Float64)
+	        # Calculate number of Hessian elements (n*(n+1)/2 for symmetric matrix)
+	        n_hess = div(n*(n+1), 2)
+	        
+	        return new{T}(
+	            zeros(T, n, n),     # P_matrix
+	            zeros(T, n, n),     # X_matrix
+	            zeros(T, n),        # grad_buffer
+	            zeros(T, n_hess),   # hess_buffer
+	            zeros(T, n, n),     # dP_di
+	            zeros(T, n, n),     # dP_dj
+	            zeros(T, n, n),     # d2P_didj
+	            zeros(T, n, n)      # temp_matrix
+	        )
+	    end
+	end
+	
+	function P!(P_matrix::Matrix{T}, π::AbstractVector{T}) where T<:Real
+	    n = length(π)
+	    @inbounds for i in 1:n
+	        for j in 1:n
+	            P_matrix[i,j] = f(π[i] - j)
+	        end
+	    end
+	    return P_matrix
+	end
+	
+	function F!(buffers::MatrixBuffers{T}, A::Matrix{T}, π::AbstractVector{T}) where T<:Real
+	    P!(buffers.P_matrix, π)  # Fill P_matrix in-place
+	    
+	    # Compute A*P in-place
+	    mul!(buffers.X_matrix, A, buffers.P_matrix)
+	    
+	    # Return -sum(abs2, X) without allocations
+	    result = zero(T)
+	    @inbounds for i in eachindex(buffers.X_matrix)
+	        result -= abs2(buffers.X_matrix[i])
+	    end
+	    
+	    return result
+	end
+	
+	# Compute gradient analytically and store in pre-allocated vector
+	function dFdπ!(
+	    grad::AbstractVector{T},
+	    buffers::MatrixBuffers{T}, 
+	    A::Matrix{T}, 
+	    π::AbstractVector{T}
+	) where T<:Real
+	    n = length(π)
+	    P!(buffers.P_matrix, π)
+	    mul!(buffers.X_matrix, A, buffers.P_matrix)
+	    
+	    # Zero out the gradient buffer
+	    fill!(grad, zero(T))
+
+		# Compute dGdP
+		dGdP!(buffers.temp_matrix, buffers.X_matrix, A)
+
+		# ∂G/∂P * ∂P∂p
+		for k in eachindex(grad)
+			for j in 1:n
+				grad[k] += buffers.temp_matrix[k, j] * df(π[k] - j)
+			end
+		end
+		
+	    return grad
+	end
+
+	function dGdP!(result::Matrix{T}, AP::Matrix{T}, A::Matrix{T}) where T<:Real
+	    # Compute AP*A and store in result
+	    mul!(result, AP, A)
+	    
+	    # Multiply by -2
+	    rmul!(result, -2)
+	    
+	    return result
+	end
+	
+	# Compute Hessian structure - returns indices of the non-zero elements
+	function hessian_structure(n::Int)
+	    # For a dense Hessian, return all (i,j) pairs where i≤j (lower triangular)
+	    idx = 1
+	    row_indices = Int[]
+	    col_indices = Int[]
+	    
+	    for i in 1:n
+	        for j in i:n  # Only upper triangular part due to symmetry
+	            push!(row_indices, i)
+	            push!(col_indices, j)
+	            idx += 1
+	        end
+	    end
+	    
+	    return row_indices, col_indices
+	end
+	
+	# Compute Hessian values analytically and store in pre-allocated vector
+	function F_hessian_π!(
+	    hess::AbstractVector{T},
+	    structure::Tuple{Vector{Int},Vector{Int}},
+	    buffers::MatrixBuffers{T}, 
+	    A::Matrix{T}, 
+	    π::AbstractVector{T}
+	) where T<:Real
+	    n = length(π)
+	    row_idx, col_idx = structure
+	    
+	    # Compute necessary matrices
+	    P!(buffers.P_matrix, π)
+	    mul!(buffers.X_matrix, A, buffers.P_matrix)
+	    
+	    # Calculate each Hessian element
+	    @inbounds for k in eachindex(row_idx, col_idx)
+	        i, j = row_idx[k], col_idx[k]
+	        
+	        # This is where you would use your analytical formula
+	        # Below is a placeholder - replace with your analytic Hessian formula
+	        
+	        # Compute ∂P/∂πᵢ
+	        fill!(buffers.dP_di, zero(T))
+	        for a in 1:n
+	            for b in 1:n
+	                buffers.dP_di[a,b] = df(π[a] - b) * (a == i ? one(T) : zero(T))
+	            end
+	        end
+	        
+	        # Compute ∂P/∂πⱼ
+	        fill!(buffers.dP_dj, zero(T))
+	        for a in 1:n
+	            for b in 1:n
+	                buffers.dP_dj[a,b] = df(π[a] - b) * (a == j ? one(T) : zero(T))
+	            end
+	        end
+	        
+	        # Compute ∂²P/∂πᵢ∂πⱼ
+	        fill!(buffers.d2P_didj, zero(T))
+	        for a in 1:n
+	            for b in 1:n
+	                is_i = (a == i ? one(T) : zero(T))
+	                is_j = (a == j ? one(T) : zero(T))
+	                buffers.d2P_didj[a,b] = d2f(π[a] - b) * is_i * is_j
+	            end
+	        end
+	        
+	        # Compute A*∂P/∂πᵢ
+	        mul!(buffers.temp_matrix, A, buffers.dP_di)
+	        A_dP_di = copy(buffers.temp_matrix)  # Need to save this
+	        
+	        # Compute A*∂P/∂πⱼ
+	        mul!(buffers.temp_matrix, A, buffers.dP_dj)
+	        A_dP_dj = copy(buffers.temp_matrix)  # Need to save this
+	        
+	        # Compute A*∂²P/∂πᵢ∂πⱼ
+	        mul!(buffers.temp_matrix, A, buffers.d2P_didj)
+	        
+	        # Compute Hessian element: -2⟨A*∂P/∂πᵢ, A*∂P/∂πⱼ⟩ - 2⟨A*P, A*∂²P/∂πᵢ∂πⱼ⟩
+	        hess_val = zero(T)
+	        
+	        # First term: -2⟨A*∂P/∂πᵢ, A*∂P/∂πⱼ⟩
+	        for a in eachindex(A_dP_di, A_dP_dj)
+	            hess_val -= 2 * A_dP_di[a] * A_dP_dj[a]
+	        end
+	        
+	        # Second term: -2⟨A*P, A*∂²P/∂πᵢ∂πⱼ⟩
+	        for a in eachindex(buffers.X_matrix, buffers.temp_matrix)
+	            hess_val -= 2 * buffers.X_matrix[a] * buffers.temp_matrix[a]
+	        end
+	        
+	        hess[k] = hess_val
+	    end
+	    
+	    return hess
+	end
+	
+	# Custom AD backend with pre-allocated buffers and analytic derivatives
+	mutable struct AnalyticalDerivativesBackend{T} <: MOI.Nonlinear.AbstractAutomaticDifferentiation
+	    A::Matrix{T}                    # Constant matrix A
+	    buffers::MatrixBuffers{T}       # Pre-allocated buffers
+	    hessian_struct::Tuple{Vector{Int},Vector{Int}}  # Hessian structure
+	    
+	    function AnalyticalDerivativesBackend(A::Matrix{T}) where T<:Real
+	        n = size(A, 1)
+	        return new{T}(
+	            A, 
+	            MatrixBuffers(n, T),
+	            hessian_structure(n)
+	        )
+	    end
+	end
+	
+	function MOI.initialize(
+	    d::AnalyticalDerivativesBackend{T},
+	    features,
+	    model_cache,
+	    evaluator_cache,
+	) where T
+	    # Check that Hessian is requested if needed
+	    if :Hess in features
+	        # Hessian is supported
+	    end
+	    return nothing
+	end
+	
+	# Evaluate objective without allocations
+	function MOI.eval_objective(
+	    d::AnalyticalDerivativesBackend{T},
+	    x,
+	    evaluator_cache,
+	) where T
+	    return F!(d.buffers, d.A, x)
+	end
+	
+	# Compute gradient with analytical formula
+	function MOI.eval_objective_gradient(
+	    d::AnalyticalDerivativesBackend{T},
+	    grad,
+	    x,
+	    evaluator_cache,
+	) where T
+	    return dFdπ!(grad, d.buffers, d.A, x)
+	end
+
+	# Additional methods for constraint handling
+
+	# Evaluate constraint values
+	function MOI.eval_constraint(
+	    d::AnalyticalDerivativesBackend{T},
+	    g,
+	    x,
+	    evaluator_cache,
+	) where T
+	    # Calculate constraint values and store in g
+	    # Example for a nonlinear constraint:
+	    # g[1] = sum(x[i]^2 for i in eachindex(x)) - (n*(n+1)*(2*n+1)/6)
+	    
+	    # Your analytical constraint evaluation goes here
+	    return nothing
+	end
+	
+	# Define constraint Jacobian structure
+	function MOI.jacobian_structure(
+	    d::AnalyticalDerivativesBackend{T},
+	    evaluator_cache,
+	) where T
+	    # Return (row, col) pairs for nonzero Jacobian entries
+	    # For a dense Jacobian, include all entries
+	    rows = Int[]
+	    cols = Int[]
+	    
+	    # If you have m constraints and n variables
+	    m = 1  # Number of constraints (adjust as needed)
+	    n = size(d.A, 1)  # Number of variables
+	    
+	    for i in 1:m
+	        for j in 1:n
+	            push!(rows, i)
+	            push!(cols, j)
+	        end
+	    end
+	    
+	    return collect(zip(rows, cols))
+	end
+	
+	# Evaluate constraint Jacobian values
+	function MOI.eval_constraint_jacobian(
+	    d::AnalyticalDerivativesBackend{T},
+	    J,
+	    x,
+	    evaluator_cache,
+	) where T
+	    # Fill J with Jacobian values using your analytical formulas
+	    # For example, for the constraint sum(x[i]^2) = constant:
+	    n = length(x)
+	    for i in 1:n
+	        # J[i] = 2*x[i]  # ∂(sum(x[j]^2))/∂x[i] = 2*x[i]
+	    end
+	    
+	    # Your analytical constraint Jacobian calculation goes here
+	    return nothing
+	end
+
+	# Provide the Hessian structure information
+	function MOI.hessian_lagrangian_structure(
+	    d::AnalyticalDerivativesBackend{T},
+	    evaluator_cache,
+	) where T
+	    return collect(zip(d.hessian_struct...))
+	end
+	
+	# Enhance the Hessian calculation to include constraint contributions
+	function MOI.eval_hessian_lagrangian(
+	    d::AnalyticalDerivativesBackend{T},
+	    H,
+	    x,
+	    σ,
+	    μ,
+	    evaluator_cache,
+	) where T
+	    # Zero out the Hessian first
+	    fill!(H, zero(T))
+	    
+	    # Add objective contribution if σ is nonzero
+	    if !iszero(σ)
+	        F_hessian_π!(d.buffers.hess_buffer, d.hessian_struct, d.buffers, d.A, x)
+	        @inbounds for i in eachindex(H)
+	            H[i] = σ * d.buffers.hess_buffer[i]
+	        end
+	    end
+	    
+	    # Add constraint contributions if μ contains nonzeros
+	    # The Lagrangian Hessian includes: σ∇²f(x) + Σᵢ μᵢ∇²gᵢ(x)
+	    
+	    # Example for quadratic constraint sum(x[i]^2) = constant
+	    # The Hessian of this constraint is diagonal with 2 on each diagonal entry
+	    if !isempty(μ)
+	        n = length(x)
+	        idx = 1
+	        for i in 1:n
+	            for j in i:n
+	                if i == j  # Diagonal entry for quadratic constraint
+	                    # H[idx] += μ[1] * 2  # Add 2*μ[1] to diagonal
+	                end
+	                idx += 1
+	            end
+	        end
+	    end
+	    
+	    # Your analytical Lagrangian Hessian calculation goes here
+	    return nothing
+	end
+end
+
+# ╔═╡ a2a5a2da-5a06-4d03-899b-2d50676ecad5
+begin
+
+	function G(
+		A::Matrix{T},
+		π::Vector{T},
+		P_result::Matrix{T}
+	) where T<:Real
+		P!(P_result, π)
+	    return F(A, P_result)
+	end
+
+	"""
+	    F!(A::Matrix{T}, π::Vector{T}) where T<:Real
+	
+	Calculate F(A,π) = G(A,P(π))
+	"""
+	function G(A::Matrix{T}, π::Vector{T}) where T<:Real
+	    return F(A, P(π))
+	end
+	
+end
+
+# ╔═╡ d20cf2cd-fef5-49e1-a2af-918b3cbda8f4
+d = AnalyticalDerivativesBackend(A)
+
+# ╔═╡ 66662f87-f0b7-459c-a292-b3ce997b32da
+MOI.eval_objective(d, p, nothing)
+
+# ╔═╡ 9ec3ff7d-1d4c-4874-a574-4f11385f9372
+begin
+	grad = zeros(n)
+	MOI.eval_objective_gradient(d, grad, p, nothing)
+end
+
+# ╔═╡ 64470108-a882-42ac-b65e-c7af540da218
+
 
 # ╔═╡ 00000000-0000-0000-0000-000000000001
 PLUTO_PROJECT_TOML_CONTENTS = """
@@ -548,7 +1062,6 @@ LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
 NPZ = "15e1cf62-19b3-5cfa-8e77-841668bca605"
 Plots = "91a5bcdd-55d7-5caf-9e0b-520d859cae80"
 SparseArrays = "2f01184e-e22b-5df5-ae63-d93ebab69eaf"
-Zygote = "e88e6eb3-aa80-5325-afca-941959d7151f"
 
 [compat]
 Ipopt = "~1.7.2"
@@ -556,7 +1069,6 @@ JuMP = "~1.24.0"
 LazyArrays = "~2.6.1"
 NPZ = "~0.4.3"
 Plots = "~1.40.9"
-Zygote = "~0.7.4"
 """
 
 # ╔═╡ 00000000-0000-0000-0000-000000000002
@@ -565,35 +1077,13 @@ PLUTO_MANIFEST_TOML_CONTENTS = """
 
 julia_version = "1.11.3"
 manifest_format = "2.0"
-project_hash = "d55c351d04ad7dc7ebd28e6e137d3d26dc431057"
+project_hash = "2ad19eab5e454f6572e6bf0cbe75b2a85326997b"
 
 [[deps.ASL_jll]]
 deps = ["Artifacts", "JLLWrappers", "Libdl", "Pkg"]
 git-tree-sha1 = "6252039f98492252f9e47c312c8ffda0e3b9e78d"
 uuid = "ae81ac8f-d209-56e5-92de-9978fef736f9"
 version = "0.1.3+0"
-
-[[deps.AbstractFFTs]]
-deps = ["LinearAlgebra"]
-git-tree-sha1 = "d92ad398961a3ed262d8bf04a1a2b8340f915fef"
-uuid = "621f4979-c628-5d54-868e-fcf4e3e8185c"
-version = "1.5.0"
-weakdeps = ["ChainRulesCore", "Test"]
-
-    [deps.AbstractFFTs.extensions]
-    AbstractFFTsChainRulesCoreExt = "ChainRulesCore"
-    AbstractFFTsTestExt = "Test"
-
-[[deps.Adapt]]
-deps = ["LinearAlgebra", "Requires"]
-git-tree-sha1 = "cd8b948862abee8f3d3e9b73a102a9ca924debb0"
-uuid = "79e6a3ab-5dfb-504d-930d-738a2a938a0e"
-version = "4.2.0"
-weakdeps = ["SparseArrays", "StaticArrays"]
-
-    [deps.Adapt.extensions]
-    AdaptSparseArraysExt = "SparseArrays"
-    AdaptStaticArraysExt = "StaticArrays"
 
 [[deps.AliasTables]]
 deps = ["PtrArrays", "Random"]
@@ -619,24 +1109,6 @@ weakdeps = ["SparseArrays"]
 uuid = "56f22d72-fd6d-98f1-02f0-08ddc0907c33"
 version = "1.11.0"
 
-[[deps.Atomix]]
-deps = ["UnsafeAtomics"]
-git-tree-sha1 = "b5bb4dc6248fde467be2a863eb8452993e74d402"
-uuid = "a9b6321e-bd34-4604-b9c9-b65b8de01458"
-version = "1.1.1"
-
-    [deps.Atomix.extensions]
-    AtomixCUDAExt = "CUDA"
-    AtomixMetalExt = "Metal"
-    AtomixOpenCLExt = "OpenCL"
-    AtomixoneAPIExt = "oneAPI"
-
-    [deps.Atomix.weakdeps]
-    CUDA = "052768ef-5323-5732-b1bb-66c8b64840ba"
-    Metal = "dde4c033-4e86-420c-a63e-0dd931031962"
-    OpenCL = "08131aa3-fb12-5dee-8b74-c09406e224a2"
-    oneAPI = "8f75cd03-7ff8-4ecb-9b8f-daf728133b1b"
-
 [[deps.Base64]]
 uuid = "2a0f44e3-6c83-55bd-87e4-b1978d98bd5f"
 version = "1.11.0"
@@ -658,32 +1130,11 @@ git-tree-sha1 = "1b96ea4a01afe0ea4090c5c8039690672dd13f2e"
 uuid = "6e34b625-4abd-537c-b88f-471c36dfa7a0"
 version = "1.0.9+0"
 
-[[deps.CEnum]]
-git-tree-sha1 = "389ad5c84de1ae7cf0e28e381131c98ea87d54fc"
-uuid = "fa961155-64e5-5f13-b03f-caf6b980ea82"
-version = "0.5.0"
-
 [[deps.Cairo_jll]]
 deps = ["Artifacts", "Bzip2_jll", "CompilerSupportLibraries_jll", "Fontconfig_jll", "FreeType2_jll", "Glib_jll", "JLLWrappers", "LZO_jll", "Libdl", "Pixman_jll", "Xorg_libXext_jll", "Xorg_libXrender_jll", "Zlib_jll", "libpng_jll"]
 git-tree-sha1 = "009060c9a6168704143100f36ab08f06c2af4642"
 uuid = "83423d85-b0ee-5818-9007-b63ccbeb887a"
 version = "1.18.2+1"
-
-[[deps.ChainRules]]
-deps = ["Adapt", "ChainRulesCore", "Compat", "Distributed", "GPUArraysCore", "IrrationalConstants", "LinearAlgebra", "Random", "RealDot", "SparseArrays", "SparseInverseSubset", "Statistics", "StructArrays", "SuiteSparse"]
-git-tree-sha1 = "a975ae558af61a2a48720a6271661bf2621e0f4e"
-uuid = "082447d4-558c-5d27-93f4-14fc19e9eca2"
-version = "1.72.3"
-
-[[deps.ChainRulesCore]]
-deps = ["Compat", "LinearAlgebra"]
-git-tree-sha1 = "1713c74e00545bfe14605d2a2be1712de8fbcb58"
-uuid = "d360d2e6-b24c-11e9-a2a3-2a2ae2dbcce4"
-version = "1.25.1"
-weakdeps = ["SparseArrays"]
-
-    [deps.ChainRulesCore.extensions]
-    ChainRulesCoreSparseArraysExt = "SparseArrays"
 
 [[deps.CodecBzip2]]
 deps = ["Bzip2_jll", "TranscodingStreams"]
@@ -756,21 +1207,6 @@ git-tree-sha1 = "d9d26935a0bcffc87d2613ce14c527c99fc543fd"
 uuid = "f0e56b4a-5159-44fe-b623-3e5288b988bb"
 version = "2.5.0"
 
-[[deps.ConstructionBase]]
-git-tree-sha1 = "76219f1ed5771adbb096743bff43fb5fdd4c1157"
-uuid = "187b0558-2788-49d3-abe0-74a17ed4e7c9"
-version = "1.5.8"
-
-    [deps.ConstructionBase.extensions]
-    ConstructionBaseIntervalSetsExt = "IntervalSets"
-    ConstructionBaseLinearAlgebraExt = "LinearAlgebra"
-    ConstructionBaseStaticArraysExt = "StaticArrays"
-
-    [deps.ConstructionBase.weakdeps]
-    IntervalSets = "8197267c-284f-5f27-9208-e0e47529a953"
-    LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
-    StaticArrays = "90137ffa-7385-5640-81b9-e52037218182"
-
 [[deps.Contour]]
 git-tree-sha1 = "439e35b0b36e2e5881738abc8857bd92ad6ff9a8"
 uuid = "d38c429a-6771-53c6-b99e-75d170b6e991"
@@ -786,11 +1222,6 @@ deps = ["Compat", "InteractiveUtils", "OrderedCollections"]
 git-tree-sha1 = "1d0a14036acb104d9e89698bd408f63ab58cdc82"
 uuid = "864edb3b-99cc-5e75-8d2d-829cb0a9cfe8"
 version = "0.18.20"
-
-[[deps.DataValueInterfaces]]
-git-tree-sha1 = "bfc1187b79289637fa0ef6d4436ebdfe6905cbd6"
-uuid = "e2d170a0-9d28-54be-80f0-106bbe20a464"
-version = "1.0.0"
 
 [[deps.Dates]]
 deps = ["Printf"]
@@ -820,11 +1251,6 @@ deps = ["IrrationalConstants", "LogExpFunctions", "NaNMath", "Random", "SpecialF
 git-tree-sha1 = "23163d55f885173722d1e4cf0f6110cdbaf7e272"
 uuid = "b552c78f-8df3-52c6-915a-8e097449b14b"
 version = "1.15.1"
-
-[[deps.Distributed]]
-deps = ["Random", "Serialization", "Sockets"]
-uuid = "8ba89e20-285c-5b6f-9357-94700520ee1b"
-version = "1.11.0"
 
 [[deps.DocStringExtensions]]
 deps = ["LibGit2"]
@@ -919,10 +1345,12 @@ deps = ["CommonSubexpressions", "DiffResults", "DiffRules", "LinearAlgebra", "Lo
 git-tree-sha1 = "a2df1b776752e3f344e5116c06d75a10436ab853"
 uuid = "f6369f11-7733-5829-9624-2563aa707210"
 version = "0.10.38"
-weakdeps = ["StaticArrays"]
 
     [deps.ForwardDiff.extensions]
     ForwardDiffStaticArraysExt = "StaticArrays"
+
+    [deps.ForwardDiff.weakdeps]
+    StaticArrays = "90137ffa-7385-5640-81b9-e52037218182"
 
 [[deps.FreeType2_jll]]
 deps = ["Artifacts", "Bzip2_jll", "JLLWrappers", "Libdl", "Zlib_jll"]
@@ -941,18 +1369,6 @@ deps = ["Artifacts", "JLLWrappers", "Libdl", "Libglvnd_jll", "Xorg_libXcursor_jl
 git-tree-sha1 = "fcb0584ff34e25155876418979d4c8971243bb89"
 uuid = "0656b61e-2033-5cc2-a64a-77c0f6c09b89"
 version = "3.4.0+2"
-
-[[deps.GPUArrays]]
-deps = ["Adapt", "GPUArraysCore", "KernelAbstractions", "LLVM", "LinearAlgebra", "Printf", "Random", "Reexport", "ScopedValues", "Serialization", "Statistics"]
-git-tree-sha1 = "eea7b3a1964b4de269bb380462a9da604be7fcdb"
-uuid = "0c68f7d7-f131-5f86-a1c3-88cf8149b2d7"
-version = "11.2.2"
-
-[[deps.GPUArraysCore]]
-deps = ["Adapt"]
-git-tree-sha1 = "83cf05ab16a73219e5f6bd1bdfa9848fa24ac627"
-uuid = "46192b85-c4d5-4398-a991-12ede77f4527"
-version = "0.2.0"
 
 [[deps.GR]]
 deps = ["Artifacts", "Base64", "DelimitedFiles", "Downloads", "GR_jll", "HTTP", "JSON", "Libdl", "LinearAlgebra", "Preferences", "Printf", "Qt6Wayland_jll", "Random", "Serialization", "Sockets", "TOML", "Tar", "Test", "p7zip_jll"]
@@ -1001,22 +1417,11 @@ git-tree-sha1 = "55c53be97790242c29031e5cd45e8ac296dadda3"
 uuid = "2e76f6c2-a576-52d4-95c1-20adfe4de566"
 version = "8.5.0+0"
 
-[[deps.HashArrayMappedTries]]
-git-tree-sha1 = "2eaa69a7cab70a52b9687c8bf950a5a93ec895ae"
-uuid = "076d061b-32b6-4027-95e0-9a2c6f6d7e74"
-version = "0.2.0"
-
 [[deps.Hwloc_jll]]
 deps = ["Artifacts", "JLLWrappers", "Libdl"]
 git-tree-sha1 = "f93a9ce66cd89c9ba7a4695a47fd93b4c6bc59fa"
 uuid = "e33a78d0-f292-5ffc-b300-72abe9b543c8"
 version = "2.12.0+0"
-
-[[deps.IRTools]]
-deps = ["InteractiveUtils", "MacroTools"]
-git-tree-sha1 = "950c3717af761bc3ff906c2e8e52bd83390b6ec2"
-uuid = "7869d1d1-7146-5819-86e3-90919afe41df"
-version = "0.4.14"
 
 [[deps.InteractiveUtils]]
 deps = ["Markdown"]
@@ -1039,11 +1444,6 @@ version = "300.1400.1700+0"
 git-tree-sha1 = "e2222959fbc6c19554dc15174c81bf7bf3aa691c"
 uuid = "92d709cd-6900-40b7-9082-c6be49f344b6"
 version = "0.2.4"
-
-[[deps.IteratorInterfaceExtensions]]
-git-tree-sha1 = "a3f24677c21f5bbe9d2a714f95dcd58337fb2856"
-uuid = "82899510-4779-5014-852e-03e436cf321d"
-version = "1.0.0"
 
 [[deps.JLFzf]]
 deps = ["Pipe", "REPL", "Random", "fzf_jll"]
@@ -1093,22 +1493,6 @@ version = "1.24.0"
     [deps.JuMP.weakdeps]
     DimensionalData = "0703355e-b756-11e9-17c0-8b28908087d0"
 
-[[deps.KernelAbstractions]]
-deps = ["Adapt", "Atomix", "InteractiveUtils", "MacroTools", "PrecompileTools", "Requires", "StaticArrays", "UUIDs"]
-git-tree-sha1 = "80d268b2f4e396edc5ea004d1e0f569231c71e9e"
-uuid = "63c18a36-062a-441e-b654-da1e3ab1ce7c"
-version = "0.9.34"
-
-    [deps.KernelAbstractions.extensions]
-    EnzymeExt = "EnzymeCore"
-    LinearAlgebraExt = "LinearAlgebra"
-    SparseArraysExt = "SparseArrays"
-
-    [deps.KernelAbstractions.weakdeps]
-    EnzymeCore = "f151be2c-9106-41f4-ab19-57ee4f262869"
-    LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
-    SparseArrays = "2f01184e-e22b-5df5-ae63-d93ebab69eaf"
-
 [[deps.LAME_jll]]
 deps = ["Artifacts", "JLLWrappers", "Libdl"]
 git-tree-sha1 = "170b660facf5df5de098d866564877e119141cbd"
@@ -1120,24 +1504,6 @@ deps = ["Artifacts", "JLLWrappers", "Libdl"]
 git-tree-sha1 = "aaafe88dccbd957a8d82f7d05be9b69172e0cee3"
 uuid = "88015f11-f218-50d7-93a8-a6af411a945d"
 version = "4.0.1+0"
-
-[[deps.LLVM]]
-deps = ["CEnum", "LLVMExtra_jll", "Libdl", "Preferences", "Printf", "Unicode"]
-git-tree-sha1 = "5fcfea6df2ff3e4da708a40c969c3812162346df"
-uuid = "929cbde3-209d-540e-8aea-75f648917ca0"
-version = "9.2.0"
-
-    [deps.LLVM.extensions]
-    BFloat16sExt = "BFloat16s"
-
-    [deps.LLVM.weakdeps]
-    BFloat16s = "ab4f0b2a-ad5b-11e8-123f-65d77653426b"
-
-[[deps.LLVMExtra_jll]]
-deps = ["Artifacts", "JLLWrappers", "LazyArtifacts", "Libdl", "TOML"]
-git-tree-sha1 = "4b5ad6a4ffa91a00050a964492bc4f86bb48cea0"
-uuid = "dad2f222-ce93-54a1-a47d-0025e8a3acab"
-version = "0.0.35+0"
 
 [[deps.LLVMOpenMP_jll]]
 deps = ["Artifacts", "JLLWrappers", "Libdl"]
@@ -1189,11 +1555,6 @@ version = "2.6.1"
     BlockArrays = "8e7c35d0-a365-5155-bbbb-fb81a777f24e"
     BlockBandedMatrices = "ffab5731-97b5-5995-9138-79e8c1846df0"
     StaticArrays = "90137ffa-7385-5640-81b9-e52037218182"
-
-[[deps.LazyArtifacts]]
-deps = ["Artifacts", "Pkg"]
-uuid = "4af54fe1-eca0-43a8-85a7-787d91b784e3"
-version = "1.11.0"
 
 [[deps.LibCURL]]
 deps = ["LibCURL_jll", "MozillaCACerts_jll"]
@@ -1563,12 +1924,6 @@ deps = ["SHA"]
 uuid = "9a3f8284-a2c9-5f02-9a11-845980a1fd5c"
 version = "1.11.0"
 
-[[deps.RealDot]]
-deps = ["LinearAlgebra"]
-git-tree-sha1 = "9f0a1b71baaf7650f4fa8a1d168c7fb6ee41f0c9"
-uuid = "c1ae055f-0cd5-4b69-90a6-9a35b1a98df9"
-version = "0.1.0"
-
 [[deps.RecipesBase]]
 deps = ["PrecompileTools"]
 git-tree-sha1 = "5c3d09cc4f31f5fc6af001c250bf1278733100ff"
@@ -1608,12 +1963,6 @@ git-tree-sha1 = "11f3da4b25efacd1cec8e263421f2a9003a5e8e0"
 uuid = "319450e9-13b8-58e8-aa9f-8fd1420848ab"
 version = "2024.5.8+0"
 
-[[deps.ScopedValues]]
-deps = ["HashArrayMappedTries", "Logging"]
-git-tree-sha1 = "1147f140b4c8ddab224c94efa9569fc23d63ab44"
-uuid = "7e506255-f358-4e82-b7e4-beb19740aa63"
-version = "1.3.0"
-
 [[deps.Scratch]]
 deps = ["Dates"]
 git-tree-sha1 = "3bac05bc7e74a75fd9cba4295cde4045d9fe2386"
@@ -1650,38 +1999,23 @@ deps = ["Libdl", "LinearAlgebra", "Random", "Serialization", "SuiteSparse_jll"]
 uuid = "2f01184e-e22b-5df5-ae63-d93ebab69eaf"
 version = "1.11.0"
 
-[[deps.SparseInverseSubset]]
-deps = ["LinearAlgebra", "SparseArrays", "SuiteSparse"]
-git-tree-sha1 = "52962839426b75b3021296f7df242e40ecfc0852"
-uuid = "dc90abb0-5640-4711-901d-7e5b23a2fada"
-version = "0.1.2"
-
 [[deps.SpecialFunctions]]
 deps = ["IrrationalConstants", "LogExpFunctions", "OpenLibm_jll", "OpenSpecFun_jll"]
 git-tree-sha1 = "64cca0c26b4f31ba18f13f6c12af7c85f478cfde"
 uuid = "276daf66-3868-5448-9aa4-cd146d93841b"
 version = "2.5.0"
-weakdeps = ["ChainRulesCore"]
 
     [deps.SpecialFunctions.extensions]
     SpecialFunctionsChainRulesCoreExt = "ChainRulesCore"
+
+    [deps.SpecialFunctions.weakdeps]
+    ChainRulesCore = "d360d2e6-b24c-11e9-a2a3-2a2ae2dbcce4"
 
 [[deps.StableRNGs]]
 deps = ["Random"]
 git-tree-sha1 = "83e6cce8324d49dfaf9ef059227f91ed4441a8e5"
 uuid = "860ef19b-820b-49d6-a774-d7a799459cd3"
 version = "1.0.2"
-
-[[deps.StaticArrays]]
-deps = ["LinearAlgebra", "PrecompileTools", "Random", "StaticArraysCore"]
-git-tree-sha1 = "0feb6b9031bd5c51f9072393eb5ab3efd31bf9e4"
-uuid = "90137ffa-7385-5640-81b9-e52037218182"
-version = "1.9.13"
-weakdeps = ["ChainRulesCore", "Statistics"]
-
-    [deps.StaticArrays.extensions]
-    StaticArraysChainRulesCoreExt = "ChainRulesCore"
-    StaticArraysStatisticsExt = "Statistics"
 
 [[deps.StaticArraysCore]]
 git-tree-sha1 = "192954ef1208c7019899fbf8049e717f92959682"
@@ -1710,20 +2044,6 @@ git-tree-sha1 = "29321314c920c26684834965ec2ce0dacc9cf8e5"
 uuid = "2913bbd2-ae8a-5f71-8c99-4fb6c76f3a91"
 version = "0.34.4"
 
-[[deps.StructArrays]]
-deps = ["ConstructionBase", "DataAPI", "Tables"]
-git-tree-sha1 = "5a3a31c41e15a1e042d60f2f4942adccba05d3c9"
-uuid = "09ab397b-f2b6-538f-b94a-2f83cf4a842a"
-version = "0.7.0"
-weakdeps = ["Adapt", "GPUArraysCore", "KernelAbstractions", "LinearAlgebra", "SparseArrays", "StaticArrays"]
-
-    [deps.StructArrays.extensions]
-    StructArraysAdaptExt = "Adapt"
-    StructArraysGPUArraysCoreExt = ["GPUArraysCore", "KernelAbstractions"]
-    StructArraysLinearAlgebraExt = "LinearAlgebra"
-    StructArraysSparseArraysExt = "SparseArrays"
-    StructArraysStaticArraysExt = "StaticArrays"
-
 [[deps.StructTypes]]
 deps = ["Dates", "UUIDs"]
 git-tree-sha1 = "159331b30e94d7b11379037feeb9b690950cace8"
@@ -1734,10 +2054,6 @@ version = "1.11.0"
 uuid = "f489334b-da3d-4c2e-b8f0-e476e12c162b"
 version = "1.11.0"
 
-[[deps.SuiteSparse]]
-deps = ["Libdl", "LinearAlgebra", "Serialization", "SparseArrays"]
-uuid = "4607b0f0-06f3-5cda-b6b1-a6196a1729e9"
-
 [[deps.SuiteSparse_jll]]
 deps = ["Artifacts", "Libdl", "libblastrampoline_jll"]
 uuid = "bea87d4a-7f5b-5778-9afe-8cc45184846c"
@@ -1747,18 +2063,6 @@ version = "7.7.0+0"
 deps = ["Dates"]
 uuid = "fa267f1f-6049-4f14-aa54-33bafae1ed76"
 version = "1.0.3"
-
-[[deps.TableTraits]]
-deps = ["IteratorInterfaceExtensions"]
-git-tree-sha1 = "c06b2f539df1c6efa794486abfb6ed2022561a39"
-uuid = "3783bdb8-4a98-5b6b-af9a-565f29a5fe9c"
-version = "1.0.1"
-
-[[deps.Tables]]
-deps = ["DataAPI", "DataValueInterfaces", "IteratorInterfaceExtensions", "OrderedCollections", "TableTraits"]
-git-tree-sha1 = "598cd7c1f68d1e205689b1c2fe65a9f85846f297"
-uuid = "bd369af6-aec1-5ad0-b16a-f7cc5008161c"
-version = "1.12.0"
 
 [[deps.Tar]]
 deps = ["ArgTools", "SHA"]
@@ -1820,15 +2124,6 @@ deps = ["LaTeXStrings", "Latexify", "Unitful"]
 git-tree-sha1 = "975c354fcd5f7e1ddcc1f1a23e6e091d99e99bc8"
 uuid = "45397f5d-5981-4c77-b2b3-fc36d6e9b728"
 version = "1.6.4"
-
-[[deps.UnsafeAtomics]]
-git-tree-sha1 = "b13c4edda90890e5b04ba24e20a310fbe6f249ff"
-uuid = "013be700-e6cd-48c3-b4a1-df204f14c38f"
-version = "0.3.0"
-weakdeps = ["LLVM"]
-
-    [deps.UnsafeAtomics.extensions]
-    UnsafeAtomicsLLVM = ["LLVM"]
 
 [[deps.Unzip]]
 git-tree-sha1 = "ca0969166a028236229f63514992fc073799bb78"
@@ -2032,28 +2327,6 @@ git-tree-sha1 = "446b23e73536f84e8037f5dce465e92275f6a308"
 uuid = "3161d3a3-bdf6-5164-811a-617609db77b4"
 version = "1.5.7+1"
 
-[[deps.Zygote]]
-deps = ["AbstractFFTs", "ChainRules", "ChainRulesCore", "DiffRules", "Distributed", "FillArrays", "ForwardDiff", "GPUArrays", "GPUArraysCore", "IRTools", "InteractiveUtils", "LinearAlgebra", "LogExpFunctions", "MacroTools", "NaNMath", "PrecompileTools", "Random", "Requires", "SparseArrays", "SpecialFunctions", "Statistics", "ZygoteRules"]
-git-tree-sha1 = "dabc8bf48149b0220010c2d3e555b0ca84400ce1"
-uuid = "e88e6eb3-aa80-5325-afca-941959d7151f"
-version = "0.7.4"
-
-    [deps.Zygote.extensions]
-    ZygoteColorsExt = "Colors"
-    ZygoteDistancesExt = "Distances"
-    ZygoteTrackerExt = "Tracker"
-
-    [deps.Zygote.weakdeps]
-    Colors = "5ae59095-9a9b-59fe-a467-6f913c188581"
-    Distances = "b4f34e82-e78d-54a5-968a-f98e89d6e8f7"
-    Tracker = "9f7883ad-71c0-57eb-9f7f-b5c9e6d3789c"
-
-[[deps.ZygoteRules]]
-deps = ["ChainRulesCore", "MacroTools"]
-git-tree-sha1 = "434b3de333c75fc446aa0d19fc394edafd07ab08"
-uuid = "700de1a5-db45-46bc-99cf-38207098b444"
-version = "0.2.7"
-
 [[deps.eudev_jll]]
 deps = ["Artifacts", "JLLWrappers", "Libdl", "Pkg", "gperf_jll"]
 git-tree-sha1 = "431b678a28ebb559d224c0b6b6d01afce87c51ba"
@@ -2162,34 +2435,54 @@ version = "1.4.1+2"
 
 # ╔═╡ Cell order:
 # ╠═e388a8a4-fa78-11ef-2081-313d76addb66
+# ╠═46dd04c1-3c53-4d24-a061-39e9fc7bb713
+# ╟─4e7810e7-a1f7-4500-9f7d-9f5aea6ae69e
+# ╟─b0be28d0-c53d-4f74-9b3a-951d05d1a016
+# ╟─f53cd2d2-b08e-4017-8c14-05bb949ddee2
+# ╟─f7b38a1d-da6f-41c0-bff3-48ec8aa2940c
+# ╠═dfe3e0c7-c65e-47c9-8362-37e0ce3d555d
+# ╟─e9399db5-cd3e-4d15-9b39-e81c121c475d
+# ╠═b5e6dc4c-58b5-4f93-88fd-5faf47eac6dc
+# ╟─dfe481fd-f10e-4458-bfcb-d6b32f025f79
+# ╟─0ab716c2-0c36-44ec-8aa7-60b275a936b8
+# ╟─33557962-738e-4b59-b671-bef07aa3f6e0
 # ╠═6d482735-8577-4d36-b549-7a65244198a2
 # ╠═612b73c0-d30a-4f13-843f-977ddf80c244
 # ╠═01a35b96-74cf-4b2c-8835-e62e5bc102bb
+# ╟─cc487ee9-601e-4991-961e-fb5cc347182b
+# ╟─24df4924-bf5c-4ffe-8b27-19f0f67115fa
 # ╠═435ce43a-d531-48e1-a465-dd8a0844a2cf
+# ╠═73bb6329-063d-47f0-bcbc-8c0d1f8a1631
+# ╟─0592a253-a759-4ea6-ae1b-1aba8a0725ce
+# ╟─a1d7ece9-0e6d-40be-82f9-a06a2cecbd0b
+# ╟─0fdbe7aa-6006-4543-a273-3fb2027df420
+# ╠═6381946b-49fd-4541-aaab-5e58915aa984
 # ╠═bdc2bde2-917f-4ec2-9043-8b40d68377ac
+# ╠═f8a80a32-7d76-4cbb-b317-275efceba2f5
 # ╠═33783c65-92f4-428a-a619-5f2c701c0e23
 # ╠═a2a5a2da-5a06-4d03-899b-2d50676ecad5
+# ╟─19745ff7-e06a-4add-9e2c-05945d2920e3
+# ╟─0a9f5275-0edb-408c-b082-2e41102b6341
+# ╠═78a81278-1f3f-4649-aea0-154bd5430eba
 # ╠═f731520a-7e50-4949-a67c-d7094dacaa2f
-# ╠═774a09f4-7ef0-45c1-925f-ec9baa837cea
 # ╠═293b0b45-1e62-492b-be49-2fa77e847a81
 # ╠═59a251e0-8844-41bb-a794-d052b5764f73
-# ╠═e435156d-bd87-45ca-8d01-a723326dcc0e
-# ╠═6a935e16-c20b-481b-aeed-971a2fd2a302
+# ╠═b774decc-a6b1-4deb-b8c4-05bc45a9a593
 # ╠═20c3d381-3a4b-43d7-8f11-d710d5ad5b53
-# ╠═0d9d7921-5ace-4c0a-8348-f48f2a911541
 # ╠═dcab1607-b13e-4bd3-bfd7-200a24b0b92f
 # ╠═e912f13b-59f7-4dd8-b802-8a8eaf8db755
-# ╠═609998b7-834a-494f-ae1a-df1f0b23fe30
-# ╠═ac4bfffa-54f0-4635-af41-8a4b192152ca
 # ╠═48a490b5-3036-40ec-b420-4ce0c86d5e89
-# ╠═77742a50-c2a2-4770-b731-39ee484b01db
 # ╠═060d7b07-8f4b-40a3-b2c2-aebde3cb40ff
 # ╠═16aa7807-d0ca-41b6-84b2-59f47eb18fc8
 # ╠═d62d2ac1-6e88-4083-af50-3a206ed14418
 # ╠═e9702fca-1a93-4ca8-9c8a-51374cf9cf88
-# ╠═666a0444-69aa-40b1-b984-7057240957ba
-# ╠═dfd55a15-95da-40d1-bbf0-bd9800bdaf43
+# ╠═527799b7-7e50-4483-8b1e-c0d861b2946f
 # ╟─d901a80d-5fa0-4599-8fae-45d8dcd7ef00
-# ╠═9f972bc2-4405-4abd-af23-2669855c1e2b
+# ╠═a5591c79-1672-408b-bc53-b59b377c4ad8
+# ╠═d20cf2cd-fef5-49e1-a2af-918b3cbda8f4
+# ╠═66662f87-f0b7-459c-a292-b3ce997b32da
+# ╠═9ec3ff7d-1d4c-4874-a574-4f11385f9372
+# ╠═64470108-a882-42ac-b65e-c7af540da218
+# ╟─9f972bc2-4405-4abd-af23-2669855c1e2b
 # ╟─00000000-0000-0000-0000-000000000001
 # ╟─00000000-0000-0000-0000-000000000002
