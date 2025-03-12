@@ -6,8 +6,6 @@ using InteractiveUtils
 
 # ╔═╡ e388a8a4-fa78-11ef-2081-313d76addb66
 begin
-	using JuMP
-	using Ipopt
 	using LinearAlgebra
 	using SparseArrays
 	using LazyArrays
@@ -16,6 +14,14 @@ begin
 	#theme(:ggplot2)  # Use the ggplot2 theme
 
 	using Zygote
+
+	using Random
+end
+
+# ╔═╡ e9702fca-1a93-4ca8-9c8a-51374cf9cf88
+begin
+	using Optimization, OptimizationMOI, Ipopt
+	using ForwardDiff
 end
 
 # ╔═╡ 9f972bc2-4405-4abd-af23-2669855c1e2b
@@ -108,13 +114,23 @@ We want to represent a constraint
 Using integer programming we could formulate this constraint as
 
 ```math
-\begin{align}
+\begin{gather}
 (\forall i \neq j)\; \pi_i \neq \pi_j \\
-\pi \in \{1, 2, \ldots, n\}
-\end{align}
+\pi \in \{1, 2, \ldots, n\}^n
+\end{gather}
 ```
 
 **TODO**
+...
+
+Relaxed formulation:
+```math
+\begin{gather}
+	\sum_i \pi_i = \binom{n}{2} \\
+	0 \le \pi \le n \\
+	\pi \in \mathbb{R}^n
+\end{gather}
+```
 """
 
 # ╔═╡ f53cd2d2-b08e-4017-8c14-05bb949ddee2
@@ -183,7 +199,7 @@ end
 
 # ╔═╡ dfe481fd-f10e-4458-bfcb-d6b32f025f79
 md"""
-What we can do instead. Is that we assume the element $\tilde{\pi}_i$ is some weighted combination of possible integral values around it.
+What we can do instead. Is that we consider the element $\tilde{\pi}_i$ is some weighted combination of possible integral values around it.
 
 For example, suppose $\tilde{\pi}_i = 1.4$. We can think about it that this value represents the idea that the real value is either 1 or 2, but more likely (or skewed) to be 1 than 2.
 
@@ -393,7 +409,14 @@ We are solving the problem
 """
     P(π::Vector{T}) where T<:Real
 
-Construct permutation matrix P from vector π using function f.
+Construct an approximate permutation matrix from vector `π` using the basis function `f`.
+Each element `π[i]` represents the approximate position in the permutation.
+
+# Arguments
+- `π::Vector{T}`: Vector representing an approximate permutation
+
+# Returns
+- A matrix `P` where `P[i,j] = f(π[i] - j)`
 """
 function P(π::Vector{T}) where T<:Real
 	n = size(π, 1)
@@ -402,33 +425,137 @@ end
 
 # ╔═╡ f8a80a32-7d76-4cbb-b317-275efceba2f5
 """
-    P(P::π::Vector{T}) where T<:Real
+    P!(P_result::Matrix{T}, π::Vector{T}) where T<:Real
 
-Construct permutation matrix P from vector π using function f and save the result into P.
+Construct an approximate permutation matrix from vector `π` and store the result in `P_result`.
+
+# Arguments
+- `P_result::Matrix{T}`: Pre-allocated matrix to store the result
+- `π::Vector{T}`: Vector representing an approximate permutation
+
+# Returns
+- The matrix `P_result` where `P_result[i,j] = f(π[i] - j)`
 """
 function P!(P_result::Matrix{T}, π::Vector{T}) where T<:Real
-	n = size(π, 1)
+    n = length(π)
     for i in 1:n, j in 1:n
-    	@inbounds P_result[i,j] = f(π[i] - j)
+        @inbounds P_result[i,j] = f(π[i] - j)
     end
     return P_result
 end
 
 # ╔═╡ 33783c65-92f4-428a-a619-5f2c701c0e23
-begin
-	function F(A::Matrix{T}, P::Matrix{T}) where T<:Real
-		return -tr(A * P * A' * P')
-	end
+"""
+    F(A::Matrix{T}, P::Matrix{T}, c::Vector{T}=zeros(T,size(A,1))) where T<:Real
 
-	"""
-	    G(A::Matrix{T}, P::Matrix{T}) where T<:Real
-	
-	Calculate G(A,P) = -tr(A * P * A' * P') + diag(c) * P
-	"""
-	function F(A::Matrix{T}, P::Matrix{T}, c::Vector{T}) where T<:Real
-		return -tr(A * P * A' * P') + diag(c) * P
-	end
-	
+Calculate the objective function `F(A,P,c) = -tr(A * P * A' * P') + diag(c) * P`
+This measures the approximate symmetry of a graph with adjacency matrix `A`
+under the permutation `P`, with optional penalty `c`.
+
+# Arguments
+- `A::Matrix{T}`: Adjacency matrix (symmetric)
+- `P::Matrix{T}`: Permutation matrix
+- `c::Vector{T}=zeros(T,size(A,1))`: Optional vector of penalty coefficients, defaults to zeros
+
+# Returns
+- The objective function value
+"""
+function F(
+	A::Matrix{T},
+	P::Matrix{T};
+	c::Vector{T}=zeros(T,size(A,1))
+) where T<:Real
+    return -tr(A * P * A' * P') + tr(diagm(c) * P)
+end
+
+# ╔═╡ a2a5a2da-5a06-4d03-899b-2d50676ecad5
+"""
+    G(A::Matrix{T}, π::Vector{T}, c::Vector{T}=zeros(T,size(A,1))) where T<:Real
+
+Calculate the objective function `G(A,π,c) = F(A,P(π),c)`.
+
+# Arguments
+- `A::Matrix{T}`: Input matrix
+- `π::Vector{T}`: Vector representing an approximate permutation
+- `c::Vector{T}=zeros(T,size(A,1))`: Optional vector of penalty coefficients, defaults to zeros
+
+# Returns
+- The objective function value
+"""
+function G(
+	A::Matrix{T},
+	π::Vector{T};
+	c::Vector{T}=zeros(T,size(A,1))
+) where T<:Real
+    P_matrix = P(π)
+    return F(A, P_matrix, c=c)
+end
+
+# ╔═╡ 25856686-763d-484a-8fc6-3575984e2b84
+# Define a struct to encapsulate all the buffers needed for calculations
+"""
+    OptimizationBuffers{T<:Real}
+
+A structure holding pre-allocated buffers for optimization-related calculations.
+
+# Fields
+- `P_result::Matrix{T}`: Buffer for the permutation matrix
+- `grad::Vector{T}`: Buffer for the gradient vector
+- `D::Matrix{T}`: Buffer for the gradient matrix
+- `buffer::Matrix{T}`: General-purpose buffer matrix
+"""
+struct OptimizationBuffers{T<:Real}
+    P_result::Matrix{T}   # Permutation matrix
+    grad::Vector{T}       # Gradient vector
+    D::Matrix{T}          # Gradient matrix
+    buffer::Matrix{T}     # General buffer for matrix multiplications
+    
+    """
+        OptimizationBuffers{T}(n::Integer) where T<:Real
+
+    Construct an OptimizationBuffers object with pre-allocated matrices of size n × n.
+    
+    # Arguments
+    - `n::Integer`: Dimension of the matrices
+    
+    # Returns
+    - A new OptimizationBuffers object
+    """
+    function OptimizationBuffers{T}(n::Integer) where T<:Real
+        return new{T}(
+            Matrix{T}(undef, n, n),   # P_result
+            Vector{T}(undef, n),      # grad
+            Matrix{T}(undef, n, n),   # D
+            Matrix{T}(undef, n, n)    # buffer
+        )
+    end
+end
+
+
+# ╔═╡ e5853062-bf57-43c7-b242-1f21fddf4000
+
+"""
+    G!(A::Matrix{T}, π::Vector{T}, buffers::OptimizationBuffers{T}, c::Vector{T}=buffers.c_zeros) where T<:Real
+
+Calculate the objective function G(A,π,c) using pre-allocated buffers for improved performance.
+
+# Arguments
+- `A::Matrix{T}`: Input matrix
+- `π::Vector{T}`: Vector representing an approximate permutation
+- `buffers::OptimizationBuffers{T}`: Pre-allocated buffers
+- `c::Vector{T}=buffers.c_zeros`: Optional vector of penalty coefficients, defaults to zeros
+
+# Returns
+- The objective function value
+"""
+function G!(
+	A::Matrix{T},
+	π::Vector{T},
+	buffers::OptimizationBuffers{T};
+    c::Vector{T}=zeros(T,size(π,1))
+) where T<:Real
+    P!(buffers.P_result, π)
+    return F(A, buffers.P_result, c=c)
 end
 
 # ╔═╡ 19745ff7-e06a-4add-9e2c-05945d2920e3
@@ -454,7 +581,7 @@ G(A, π)
 
 By using chain rule we get
 ```math
-\frac{∂F}{∂π} = \frac{\partial G}{\partial P_{ij}} \frac{\partial P_{ij}}{\partial \pi}
+\frac{∂G}{∂π} = \frac{\partial F}{\partial P_{ij}} \frac{\partial P_{ij}}{\partial \pi}
 ```
 
 """
@@ -477,9 +604,9 @@ f'(\pi_i - j) & k = i \\
 
 # ╔═╡ ccc17689-d95c-419a-b251-ef4bc5a84e4b
 md"""
-For $\frac{\partial G}{\partial P}$ we have the known derivative
+For $\frac{\partial F}{\partial P}$ we have the known derivative
 ```math
-\frac{\partial G}{\partial P} 
+\frac{\partial F}{\partial P} 
 = −A P A^T − A^T P A + c e^T
 = −2 A P A + c e^T
 ```
@@ -511,23 +638,29 @@ end
 
 # ╔═╡ f731520a-7e50-4949-a67c-d7094dacaa2f
 """
-    dvecPdπ(π::Vector{T}, df::Function, n::Integer) where T<:Real
+    dvecPdπ(π::Vector{T}) where T<:Real
 
 Calculate the Jacobian of vec(P) with respect to π.
 Returns a sparse matrix for memory efficiency.
+
+# Arguments
+- `π::Vector{T}`: Vector representing an approximate permutation
+
+# Returns
+- Sparse matrix representing the Jacobian
 """
 function dvecPdπ(π::Vector{T}) where T<:Real
-	n = size(π, 1)
-    # Pre-allocate arrays for sparse matrix construction
-	rows = Int[]
+    n = length(π)
+    
+    rows = Int[]
     cols = Int[]
     vals = T[]
 
-	for i in 1:n
+    for i in 1:n
         for j in 1:n
-			push!(rows, (j-1)*n + i)
-			push!(cols, i)
-			push!(vals, df(π[i] - j))
+            push!(rows, (j-1)*n + i)
+            push!(cols, i)
+            push!(vals, df(π[i] - j))
         end
     end
     
@@ -535,39 +668,150 @@ function dvecPdπ(π::Vector{T}) where T<:Real
 end
 
 # ╔═╡ 293b0b45-1e62-492b-be49-2fa77e847a81
-begin
-	function dGdP(A::Matrix{T}, P::Matrix{T}, c::Vector{T}) where T<:Real
-	    n = size(c, 1)
-		return −2 * A * P * A + c * ones(T, n)'
-	end
 
-	"""
-	    dGdP(A::Matrix{T}, P::Matrix{T}) where T<:Real
+"""
+    dFdP(A::Matrix{T}, P::Matrix{T}, c::Vector{T}=zeros(T,size(A,1))) where T<:Real
+
+Calculate the gradient of the objective function with respect to P.
+Returns `∂F/∂P = -2 * A * P * A + c * e'`
+
+# Arguments
+- `A::Matrix{T}`: Input matrix
+- `P::Matrix{T}`: Permutation matrix
+- `c::Vector{T}=zeros(T,size(A,1))`: Optional vector of penalty coefficients, defaults to zeros
+
+# Returns
+- Matrix representing the gradient
+"""
+function dFdP(
+	A::Matrix{T},
+	P::Matrix{T};
+	c::Vector{T}=zeros(T,size(A,1))
+) where T<:Real
+    base_gradient = -2 * A * P * A
+    
+	n = size(c, 1)
+	return base_gradient + c * ones(T, n)'
+end
+
+# ╔═╡ 252d6270-7e58-47f3-acef-f340e74e187f
+"""
+    dFdP!(D::Matrix{T}, A::Matrix{T}, P::Matrix{T}, buffer::Matrix{T}, 
+          c::Vector{T}=zeros(T,size(A,1))) where T<:Real
+
+Calculate the gradient of the objective function with respect to `P` using pre-allocated buffers.
+Stores the result in D.
+
+# Arguments
+- `D::Matrix{T}`: Pre-allocated matrix to store the result
+- `A::Matrix{T}`: Input matrix
+- `P::Matrix{T}`: Permutation matrix
+- `buffer::Matrix{T}`: Pre-allocated buffer matrix
+- `c::Vector{T}=zeros(T,size(A,1))`: Optional vector of linear coefficients, defaults to zeros
+
+# Returns
+- The matrix D containing the gradient
+"""
+function dFdP!(
+	D::Matrix{T}, 
+	A::Matrix{T},
+	P::Matrix{T},
+	buffer::Matrix{T};
+    c::Vector{T}=zeros(T,size(A,1))
+) where T<:Real
+    mul!(buffer, A, P)
+    mul!(D, buffer, A)
+    rmul!(D, -2)
 	
-	Calculate the gradient of G with respect to P.
-	"""
-	function dGdP(A::Matrix{T}, P::Matrix{T}) where T<:Real
-	    return − 2 * A * P * A
+	for k in eachindex(D[:, 1])
+		D[:, k] += c
 	end
+    
+    return D
+end
 
-	function dGdP!(
-		D::Matrix{T},
-		A::Matrix{T},
-		P::Matrix{T},
-		c::Vector{T},
-		buffer::Matrix{T}
+# ╔═╡ 89f46bbd-d9df-4a79-9194-669bdcf3e358
+"""
+    dGdp(A::Matrix{T}, π::Vector{T}, c::Vector{T}=zeros(T,size(A,1))) where T<:Real
+
+Calculate the gradient of the objective function with respect to π.
+Uses chain rule: `∇G(π) = vec(∂G/∂P)' * ∂vec(P)/∂π`
+
+# Arguments
+- `A::Matrix{T}`: Input matrix
+- `π::Vector{T}`: Vector representing an approximate permutation
+- `c::Vector{T}=zeros(T,size(A,1))`: Optional vector of penalty coefficients, defaults to zeros
+
+# Returns
+- Vector representing the gradient with respect to π
+"""
+function dFdp(
+	A::Matrix{T},
+	π::Vector{T};
+	c::Vector{T}=zeros(T,size(A,1))
+) where T<:Real
+	
+    P_matrix = P(π)
+    grad_P = dFdP(A, P_matrix, c=c)
+    jacob = dvecPdπ(π)
+
+    return vec(grad_P)' * jacob
+end
+
+# ╔═╡ e9751b4b-e60d-4764-adee-7e5b7d69b82e
+
+"""
+    dGdp!(grad::Vector{T}, A::Matrix{T}, π::Vector{T}, buffers::OptimizationBuffers{T}, 
+          c::Vector{T}=buffers.c_zeros) where T<:Real
+
+Calculate the gradient of the objective function with respect to π using pre-allocated buffers.
+Stores the result in grad.
+
+# Arguments
+- `grad::Vector{T}`: Pre-allocated vector to store the result
+- `A::Matrix{T}`: Input matrix
+- `π::Vector{T}`: Vector representing an approximate permutation
+- `buffers::OptimizationBuffers{T}`: Pre-allocated buffers
+- `c::Vector{T}=buffers.c_zeros`: Optional vector of linear coefficients, defaults to zeros
+
+# Returns
+- The vector grad containing the gradient
+"""
+function dGdp!(
+	grad::Vector{T},
+	A::Matrix{T},
+	π::Vector{T},
+	buffers::OptimizationBuffers{T}; 
+    c::Vector{T}=zeros(T,size(π,1))
 	) where T<:Real
-		
-	    mul!(buffer, A, P)
-		mul!(D, buffer, A)
-	    rmul!(D, -2)
+    
+	n = length(π)
+    
+    P!(buffers.P_result, π)
+    dFdP!(buffers.D, A, buffers.P_result, buffers.buffer, c=c)
+    
+    fill!(grad, zero(T))
+    
+    # Manually compute the product using the sparsity pattern of the Jacobian
+    for k in eachindex(grad)
+        for j in 1:n
+            grad[k] += buffers.D[k, j] * df(π[k] - j)
+        end
+    end
+    
+    return grad
+end
 
-		for k in eachindex(D[:, 1])
-			D[:, k] += c
-		end
-	    return D
-	end
-	
+# ╔═╡ d05b092a-2bfd-457a-a30d-89f4addeca16
+begin
+	D = similar(A)
+	buffer = similar(A)
+	c = 0.2 * ones(4)
+	dFdP!(D, A, P(p),  buffer, c=c)
+	grad = zeros(n)
+	P_result = similar(A)
+	buffers = OptimizationBuffers{Float64}(n)
+	dGdp!(grad, A, p, buffers, c=c)
 end
 
 # ╔═╡ b02ec8d6-4aaa-42f3-b04f-46ff6ca338bb
@@ -593,596 +837,322 @@ By using the product rule and chain rule we get
 ```
 """
 
-# ╔═╡ 2b9c5c09-9932-41c2-8812-f038d87f0e09
-
-
 # ╔═╡ 59a251e0-8844-41bb-a794-d052b5764f73
 begin
 	"""
-	    HFdpdp(A::Matrix{T}, π::Vector{T}, f::Function, df::Function, precomputed_term2::Matrix{T}, n::Integer) where T<:Real
-	
-	Calculate the Hessian of F with respect to π.
-	Uses precomputed constant term2 for improved performance.
-	"""
-	function HFdpdp(A::Matrix{T}, π::Vector{T}, term2::Matrix{T}) where T<:Real
-	    n = size(π, 1)
-		
-		P_matrix = P(π)
-	    _dvecPdπ = dvecPdπ(π)
-	    _HG = -2 * LazyArrays.Kron(A, A)
-	    
-	    # First term: dvecPdπ * HG * dvecPdπ'
-	    term1 = _dvecPdπ' * _HG * _dvecPdπ
-	    
-	    # Use precomputed term2 directly
-	    return term1 + term2
-
-		
-	end
-	
-	"""
-	    H_elem(π::Vector{T}, i::Integer, j::Integer, d2f::Function, n::Integer) where T<:Real
+	    H_elem(π::Vector{T}, k::Integer, l::Integer) where T<:Real
 	
 	Calculate an element of the Hessian of P with respect to π.
 	Uses sparsity pattern for efficiency.
+	
+	# Arguments
+	- `π::Vector{T}`: Vector representing an approximate permutation
+	- `k::Integer`: Row index
+	- `l::Integer`: Column index
+	
+	# Returns
+	- Sparse matrix representing the element of the Hessian
 	"""
 	function H_elem(π::Vector{T}, k::Integer, l::Integer) where T<:Real
-		n = size(π, 1)
-		
-		rows = Int[]
+	    n = length(π)
+	    
+	    rows = Int[]
 	    cols = Int[]
 	    vals = T[]
 	    
-		# i == k == l
+	    # Only non-zero for k == l due to sparsity pattern
 	    if k == l
 	        for j in 1:n
-				push!(rows, k) # i == k
-				push!(cols, j)
+	            push!(rows, k)
+	            push!(cols, j)
 	            push!(vals, d2f(π[k] - j))
 	        end
 	    end
-			    
+	        
 	    return sparse(rows, cols, vals, n, n)
 	end
 	
 	"""
-	    precompute_hessian_term2(A::Matrix{T}, π::Vector{T}, f::Function, d2f::Function, n::Integer) where T<:Real
+	    HGdpdp_term2(A::Matrix{T}, π::Vector{T}, c::Vector{T}=zeros(T,size(A,1))) where T<:Real
 	
 	Precompute the constant second term of the Hessian matrix.
 	This term remains constant throughout optimization when using the original irwin_hall_3 function.
+	
+	# Arguments
+	- `A::Matrix{T}`: Input matrix
+	- `π::Vector{T}`: Vector representing an approximate permutation
+	- `c::Vector{T}=zeros(T,size(A,1))`: Optional vector of linear coefficients, defaults to zeros
+	
+	# Returns
+	- Matrix representing the precomputed term
 	"""
-	function precompute_hessian_term2(A::Matrix{T}, π::Vector{T}) where T<:Real
-	    n = size(π, 1)
-		P_matrix = P(π)
-	    _dGdP = dGdP(A, P_matrix)
-
+	function HFdpdp_term2(
+		A::Matrix{T},
+		π::Vector{T};
+		c::Vector{T}=zeros(T,size(A,1))
+	) where T<:Real
+	    n = length(π)
+	    P_matrix = P(π)
+	    grad_P = dGdP(A, P_matrix, c=c)
+	
 	    term2 = zeros(T, n, n)
-		# for i in 1:n, j in 1:n, k in 1:n, l in 1:n
-		# nonzero only for k == l
-		# 
+	    
 	    for k in 1:n
-			H_kl = H_elem(π, k, k)
-			term2[k, k] = sum(_dGdP .* H_kl)
+	        H_ij = H_elem(π, k, k)
+	        term2[k, k] = sum(grad_P .* H_ij)
 	    end
 	    
 	    return term2
 	end
+	
+	"""
+	    HGdpdp(A::Matrix{T}, π::Vector{T}, term2::Matrix{T}) where T<:Real
+	
+	Calculate the Hessian of the objective function with respect to π.
+	Uses precomputed constant term2 for improved performance.
+	
+	# Arguments
+	- `A::Matrix{T}`: Input matrix
+	- `π::Vector{T}`: Vector representing an approximate permutation
+	- `term2::Matrix{T}`: Precomputed constant term
+	
+	# Returns
+	- Matrix representing the Hessian
+	"""
+	function HGdpdp(A::Matrix{T}, π::Vector{T}, term2::Matrix{T}) where T<:Real
+	    P_matrix = P(π)
+	    jacob = dvecPdπ(π)
+	    hess_G = -2 * LazyArrays.Kron(A, A)
+	    
+	    term1 = jacob' * hess_G * jacob
+	    
+	    return term1 + term2
+	end
 end
 
-# ╔═╡ a49684e8-e944-44cd-b1b9-a171d3296ba1
-
-
-# ╔═╡ 20c3d381-3a4b-43d7-8f11-d710d5ad5b53
-F(A, p)
-
-# ╔═╡ dcab1607-b13e-4bd3-bfd7-200a24b0b92f
-dvecPdπ(p)'
-
-# ╔═╡ e912f13b-59f7-4dd8-b802-8a8eaf8db755
-begin 
-	vec(dGdP(A, P(p)))' * dvecPdπ(p)
-end
-
-# ╔═╡ 48a490b5-3036-40ec-b420-4ce0c86d5e89
-term2 = precompute_hessian_term2(A, p)
-
-# ╔═╡ 060d7b07-8f4b-40a3-b2c2-aebde3cb40ff
-_dGdP = dGdP(A, P(p))
-
-# ╔═╡ 16aa7807-d0ca-41b6-84b2-59f47eb18fc8
-H_ij = H_elem(p, 1, 1)
-
-# ╔═╡ d62d2ac1-6e88-4083-af50-3a206ed14418
-HFdpdp(A, p, term2)
-
-# ╔═╡ e9702fca-1a93-4ca8-9c8a-51374cf9cf88
+# ╔═╡ b21e1363-eed9-4b68-9f76-30b565105fe6
+md"""
+# Solution
 """
-    approximate_symmetry(A::Matrix{T}; 
-                         max_iter::Integer=1000, 
-                         tol::Float64=1e-8) where T<:Real
 
-Find a permutation vector that minimizes F(A,π).
-Implements the IPOPT solution with manual derivatives and
-precomputed constant Hessian term for enhanced performance.
+# ╔═╡ 0be4b97f-f650-4252-92a9-babfa56891b4
 """
-function approximate_symmetry(A::Matrix{T}; 
-                             max_iter::Integer=1000, 
-                             tol::Float64=1e-8) where T<:Real
-    # Get matrix dimension
+    solve_with_custom_gradients(
+		A::Matrix{T}; 
+	   	c::Vector{T}=zeros(T,size(A,1)),
+	   	max_iter::Integer=1000, 
+	   	tol::Real=1e-8) where T<:Real
+
+Solve the Approximate Symmetry Problem using custom gradient calculations.
+"""
+function solve_with_custom_gradients(A::Matrix{T}; 
+                                   c::Vector{T}=zeros(T,size(A,1)),
+                                   max_iter::Integer=1000, 
+                                   tol::Real=1e-8) where T<:Real
     n = size(A, 1)
+    p0 = ones(T, n) * (n + 1)/2
     
-    # Initial point - following the approach in model.jl
-    p0 = ones(T, n) * sqrt((n + 1) * (2*n + 1) / 6)
-    
-    # Precompute the constant term2 of the Hessian
-    constant_term = precompute_hessian_term2(A, p0)
-    
-    # Create JuMP model with IPOPT solver
-    model = Model(Ipopt.Optimizer)
-    
-    # Set IPOPT options for better performance
-    set_optimizer_attribute(model, "max_iter", max_iter)
-    set_optimizer_attribute(model, "tol", tol)
-    set_optimizer_attribute(model, "hessian_approximation", "exact")
-    set_optimizer_attribute(model, "linear_solver", "ma57")  # If available
-    set_optimizer_attribute(model, "print_level", 3)
-    
-	# (relaxed) p is a permutation
-    @variable(model, n >= p[i=1:n] >= 1.0, start = p0[i])
-    @constraint(model, dot(p, p) == n*(n+1)*(2*n+1)/6)
-    
-    register(model, :F, 2, F, autodiff=true)
+    # Pre-allocate buffers
+    buffers = OptimizationBuffers{T}(n)
 
-    # Set the objective to minimize -trace
-    @NLobjective(model, Min, F(A, p))
+    function obj_function(π, p)
+        P!(buffers.P_result, π)
+        A_mat, c_vec = p
+        
+        # Calculate F(A,P) = -tr(A*P*A'*P') + tr(diagm(c)*P)
+        AP = A_mat * buffers.P_result
+        term1 = -tr(AP * A_mat' * buffers.P_result')
+        term2 = sum(c_vec .* diag(buffers.P_result))
+        
+        return term1 + term2
+    end
     
-	model
+    function grad_function!(grad, π, p)
+        A_mat, c_vec = p
+        
+        # Construct P matrix
+        P!(buffers.P_result, π)
+        
+        # Calculate gradient of F with respect to P
+        # D = dGdP = -2*A*P*A + c*e'
+        mul!(buffers.buffer, A_mat, buffers.P_result)
+        mul!(buffers.D, buffers.buffer, A_mat)
+        rmul!(buffers.D, -2)
+        
+        # Add the linear term from c
+        for k in eachindex(buffers.D[:, 1])
+            buffers.D[:, k] .+= c_vec
+        end
+        
+        # Compute gradient using sparsity pattern
+        fill!(grad, zero(T))
+        for k in eachindex(grad)
+            for j in 1:n
+                grad[k] += buffers.D[k, j] * df(π[k] - j)
+            end
+        end
+        
+        return grad
+    end
+
+	function constraint(res, π, p)
+        target_sum = n*(n+1)/2
+        res[1] = sum(π) - target_sum  # This constraint will be set to zero
+    end
+	
+    optf = OptimizationFunction(
+		obj_function,
+		Optimization.AutoForwardDiff();
+		grad=grad_function!,
+		cons=constraint
+	)
+    
+    # Lower and upper bounds
+    lb = ones(T, n)
+    ub = ones(T, n) * n
+    
+    # Create the optimization problem
+    prob = OptimizationProblem(
+		optf,
+		p0,
+		(A, c),
+		lb=lb, ub=ub,
+		lcons=[0.0], ucons=[0.0]
+	)
+    
+    # Set up IPOPT solver options
+    ipopt_options = Dict(
+        "tol" => tol,
+        "hessian_approximation" => "limited-memory",
+        "print_level" => 3,
+		"max_cpu_time" => Float64(60 * 60)
+    )
+    
+    # Set up IPOPT
+    optimizer = Ipopt.Optimizer()
+    for (key, value) in ipopt_options
+        OptimizationMOI.MOI.set(
+			optimizer,
+			OptimizationMOI.MOI.RawOptimizerAttribute(key),
+			value
+		)
+    end
+    
+    # Solve the problem
+    sol = solve(prob, optimizer)
+    
+    return sol
 end
 
 # ╔═╡ 527799b7-7e50-4483-8b1e-c0d861b2946f
 begin
 	instance = Instance(
 		"ER",
-		"data/pidnebesna/ER/ER_nNodes20_density40.npz",
-		20
+		"data/pidnebesna/ER/ER_nNodes100_density40.npz",
+		100
 	)
-	B = load_instance_data(instance)["1"]
+	B = load_instance_data(instance)["4"]
+
+	sol = solve_with_custom_gradients(B, c=0.2 * ones(instance.n))
 end
 
-# ╔═╡ d901a80d-5fa0-4599-8fae-45d8dcd7ef00
+# ╔═╡ a1dbfa99-cbb8-4454-8a56-6631fa1a2227
+sol.u
+
+# ╔═╡ 5beae2d2-ff34-43ca-8bd6-dc91cb826b8e
+σ = sol.u |> sortperm |> invperm
+
+# ╔═╡ 50b72c53-41e9-4cce-93fb-3e1e85d18169
+S(B, Matrix{Float64}(to_permutation_matrix(σ)))
+
+# ╔═╡ d44bc887-f755-40ff-bf18-5cfd07259fe3
 md"""
 ---
+
+##### Helper Functions
 """
 
-# ╔═╡ a5591c79-1672-408b-bc53-b59b377c4ad8
-begin
-	# Structure to hold pre-allocated buffers for calculations
-	mutable struct MatrixBuffers{T}
-	    P_matrix::Matrix{T}       # Buffer for permutation matrix
-	    X_matrix::Matrix{T}       # Buffer for A*P result
-	    grad_buffer::Vector{T}    # Buffer for gradient calculation
-	    hess_buffer::Vector{T}    # Buffer for Hessian values
-	    dP_di::Matrix{T}          # Buffer for ∂P/∂πᵢ
-	    dP_dj::Matrix{T}          # Buffer for ∂P/∂πⱼ
-	    d2P_didj::Matrix{T}       # Buffer for ∂²P/∂πᵢ∂πⱼ
-	    temp_matrix::Matrix{T}    # General purpose temporary matrix
-	    
-	    function MatrixBuffers(n::Int, T::DataType=Float64)
-	        # Calculate number of Hessian elements (n*(n+1)/2 for symmetric matrix)
-	        n_hess = div(n*(n+1), 2)
-	        
-	        return new{T}(
-	            zeros(T, n, n),     # P_matrix
-	            zeros(T, n, n),     # X_matrix
-	            zeros(T, n),        # grad_buffer
-	            zeros(T, n_hess),   # hess_buffer
-	            zeros(T, n, n),     # dP_di
-	            zeros(T, n, n),     # dP_dj
-	            zeros(T, n, n),     # d2P_didj
-	            zeros(T, n, n)      # temp_matrix
-	        )
-	    end
-	end
-	
-	function P!(P_matrix::Matrix{T}, π::AbstractVector{T}) where T<:Real
-	    n = length(π)
-	    @inbounds for i in 1:n
-	        for j in 1:n
-	            P_matrix[i,j] = f(π[i] - j)
-	        end
-	    end
-	    return P_matrix
-	end
-	
-	function F!(buffers::MatrixBuffers{T}, A::Matrix{T}, π::AbstractVector{T}) where T<:Real
-	    P!(buffers.P_matrix, π)  # Fill P_matrix in-place
-	    
-	    # Compute A*P in-place
-	    mul!(buffers.X_matrix, A, buffers.P_matrix)
-	    
-	    # Return -sum(abs2, X) without allocations
-	    result = zero(T)
-	    @inbounds for i in eachindex(buffers.X_matrix)
-	        result -= abs2(buffers.X_matrix[i])
-	    end
-	    
-	    return result
-	end
-	
-	# Compute gradient analytically and store in pre-allocated vector
-	function dFdπ!(
-	    grad::AbstractVector{T},
-	    buffers::MatrixBuffers{T}, 
-	    A::Matrix{T}, 
-	    π::AbstractVector{T}
-	) where T<:Real
-	    n = length(π)
-	    P!(buffers.P_matrix, π)
-	    mul!(buffers.X_matrix, A, buffers.P_matrix)
-	    
-	    # Zero out the gradient buffer
-	    fill!(grad, zero(T))
+# ╔═╡ 406dc427-e8eb-46a4-b9b8-0c80a42d0870
+"""
+    E(A::AbstractMatrix{T}, P::AbstractMatrix{T}) where T<:Number
 
-		# Compute dGdP
-		dGdP!(buffers.temp_matrix, buffers.X_matrix, A)
-
-		# ∂G/∂P * ∂P∂p
-		for k in eachindex(grad)
-			for j in 1:n
-				grad[k] += buffers.temp_matrix[k, j] * df(π[k] - j)
-			end
-		end
-		
-	    return grad
-	end
-
-	function dGdP!(result::Matrix{T}, AP::Matrix{T}, A::Matrix{T}) where T<:Real
-	    # Compute AP*A and store in result
-	    mul!(result, AP, A)
-	    
-	    # Multiply by -2
-	    rmul!(result, -2)
-	    
-	    return result
-	end
-	
-	# Compute Hessian structure - returns indices of the non-zero elements
-	function hessian_structure(n::Int)
-	    # For a dense Hessian, return all (i,j) pairs where i≤j (lower triangular)
-	    idx = 1
-	    row_indices = Int[]
-	    col_indices = Int[]
-	    
-	    for i in 1:n
-	        for j in i:n  # Only upper triangular part due to symmetry
-	            push!(row_indices, i)
-	            push!(col_indices, j)
-	            idx += 1
-	        end
-	    end
-	    
-	    return row_indices, col_indices
-	end
-	
-	# Compute Hessian values analytically and store in pre-allocated vector
-	function F_hessian_π!(
-	    hess::AbstractVector{T},
-	    structure::Tuple{Vector{Int},Vector{Int}},
-	    buffers::MatrixBuffers{T}, 
-	    A::Matrix{T}, 
-	    π::AbstractVector{T}
-	) where T<:Real
-	    n = length(π)
-	    row_idx, col_idx = structure
-	    
-	    # Compute necessary matrices
-	    P!(buffers.P_matrix, π)
-	    mul!(buffers.X_matrix, A, buffers.P_matrix)
-	    
-	    # Calculate each Hessian element
-	    @inbounds for k in eachindex(row_idx, col_idx)
-	        i, j = row_idx[k], col_idx[k]
-	        
-	        # This is where you would use your analytical formula
-	        # Below is a placeholder - replace with your analytic Hessian formula
-	        
-	        # Compute ∂P/∂πᵢ
-	        fill!(buffers.dP_di, zero(T))
-	        for a in 1:n
-	            for b in 1:n
-	                buffers.dP_di[a,b] = df(π[a] - b) * (a == i ? one(T) : zero(T))
-	            end
-	        end
-	        
-	        # Compute ∂P/∂πⱼ
-	        fill!(buffers.dP_dj, zero(T))
-	        for a in 1:n
-	            for b in 1:n
-	                buffers.dP_dj[a,b] = df(π[a] - b) * (a == j ? one(T) : zero(T))
-	            end
-	        end
-	        
-	        # Compute ∂²P/∂πᵢ∂πⱼ
-	        fill!(buffers.d2P_didj, zero(T))
-	        for a in 1:n
-	            for b in 1:n
-	                is_i = (a == i ? one(T) : zero(T))
-	                is_j = (a == j ? one(T) : zero(T))
-	                buffers.d2P_didj[a,b] = d2f(π[a] - b) * is_i * is_j
-	            end
-	        end
-	        
-	        # Compute A*∂P/∂πᵢ
-	        mul!(buffers.temp_matrix, A, buffers.dP_di)
-	        A_dP_di = copy(buffers.temp_matrix)  # Need to save this
-	        
-	        # Compute A*∂P/∂πⱼ
-	        mul!(buffers.temp_matrix, A, buffers.dP_dj)
-	        A_dP_dj = copy(buffers.temp_matrix)  # Need to save this
-	        
-	        # Compute A*∂²P/∂πᵢ∂πⱼ
-	        mul!(buffers.temp_matrix, A, buffers.d2P_didj)
-	        
-	        # Compute Hessian element: -2⟨A*∂P/∂πᵢ, A*∂P/∂πⱼ⟩ - 2⟨A*P, A*∂²P/∂πᵢ∂πⱼ⟩
-	        hess_val = zero(T)
-	        
-	        # First term: -2⟨A*∂P/∂πᵢ, A*∂P/∂πⱼ⟩
-	        for a in eachindex(A_dP_di, A_dP_dj)
-	            hess_val -= 2 * A_dP_di[a] * A_dP_dj[a]
-	        end
-	        
-	        # Second term: -2⟨A*P, A*∂²P/∂πᵢ∂πⱼ⟩
-	        for a in eachindex(buffers.X_matrix, buffers.temp_matrix)
-	            hess_val -= 2 * buffers.X_matrix[a] * buffers.temp_matrix[a]
-	        end
-	        
-	        hess[k] = hess_val
-	    end
-	    
-	    return hess
-	end
-	
-	# Custom AD backend with pre-allocated buffers and analytic derivatives
-	mutable struct AnalyticalDerivativesBackend{T} <: MOI.Nonlinear.AbstractAutomaticDifferentiation
-	    A::Matrix{T}                    # Constant matrix A
-	    buffers::MatrixBuffers{T}       # Pre-allocated buffers
-	    hessian_struct::Tuple{Vector{Int},Vector{Int}}  # Hessian structure
-	    
-	    function AnalyticalDerivativesBackend(A::Matrix{T}) where T<:Real
-	        n = size(A, 1)
-	        return new{T}(
-	            A, 
-	            MatrixBuffers(n, T),
-	            hessian_structure(n)
-	        )
-	    end
-	end
-	
-	function MOI.initialize(
-	    d::AnalyticalDerivativesBackend{T},
-	    features,
-	    model_cache,
-	    evaluator_cache,
-	) where T
-	    # Check that Hessian is requested if needed
-	    if :Hess in features
-	        # Hessian is supported
-	    end
-	    return nothing
-	end
-	
-	# Evaluate objective without allocations
-	function MOI.eval_objective(
-	    d::AnalyticalDerivativesBackend{T},
-	    x,
-	    evaluator_cache,
-	) where T
-	    return F!(d.buffers, d.A, x)
-	end
-	
-	# Compute gradient with analytical formula
-	function MOI.eval_objective_gradient(
-	    d::AnalyticalDerivativesBackend{T},
-	    grad,
-	    x,
-	    evaluator_cache,
-	) where T
-	    return dFdπ!(grad, d.buffers, d.A, x)
-	end
-
-	# Additional methods for constraint handling
-
-	# Evaluate constraint values
-	function MOI.eval_constraint(
-	    d::AnalyticalDerivativesBackend{T},
-	    g,
-	    x,
-	    evaluator_cache,
-	) where T
-	    # Calculate constraint values and store in g
-	    # Example for a nonlinear constraint:
-	    # g[1] = sum(x[i]^2 for i in eachindex(x)) - (n*(n+1)*(2*n+1)/6)
-	    
-	    # Your analytical constraint evaluation goes here
-	    return nothing
-	end
-	
-	# Define constraint Jacobian structure
-	function MOI.jacobian_structure(
-	    d::AnalyticalDerivativesBackend{T},
-	    evaluator_cache,
-	) where T
-	    # Return (row, col) pairs for nonzero Jacobian entries
-	    # For a dense Jacobian, include all entries
-	    rows = Int[]
-	    cols = Int[]
-	    
-	    # If you have m constraints and n variables
-	    m = 1  # Number of constraints (adjust as needed)
-	    n = size(d.A, 1)  # Number of variables
-	    
-	    for i in 1:m
-	        for j in 1:n
-	            push!(rows, i)
-	            push!(cols, j)
-	        end
-	    end
-	    
-	    return collect(zip(rows, cols))
-	end
-	
-	# Evaluate constraint Jacobian values
-	function MOI.eval_constraint_jacobian(
-	    d::AnalyticalDerivativesBackend{T},
-	    J,
-	    x,
-	    evaluator_cache,
-	) where T
-	    # Fill J with Jacobian values using your analytical formulas
-	    # For example, for the constraint sum(x[i]^2) = constant:
-	    n = length(x)
-	    for i in 1:n
-	        # J[i] = 2*x[i]  # ∂(sum(x[j]^2))/∂x[i] = 2*x[i]
-	    end
-	    
-	    # Your analytical constraint Jacobian calculation goes here
-	    return nothing
-	end
-
-	# Provide the Hessian structure information
-	function MOI.hessian_lagrangian_structure(
-	    d::AnalyticalDerivativesBackend{T},
-	    evaluator_cache,
-	) where T
-	    return collect(zip(d.hessian_struct...))
-	end
-	
-	# Enhance the Hessian calculation to include constraint contributions
-	function MOI.eval_hessian_lagrangian(
-	    d::AnalyticalDerivativesBackend{T},
-	    H,
-	    x,
-	    σ,
-	    μ,
-	    evaluator_cache,
-	) where T
-	    # Zero out the Hessian first
-	    fill!(H, zero(T))
-	    
-	    # Add objective contribution if σ is nonzero
-	    if !iszero(σ)
-	        F_hessian_π!(d.buffers.hess_buffer, d.hessian_struct, d.buffers, d.A, x)
-	        @inbounds for i in eachindex(H)
-	            H[i] = σ * d.buffers.hess_buffer[i]
-	        end
-	    end
-	    
-	    # Add constraint contributions if μ contains nonzeros
-	    # The Lagrangian Hessian includes: σ∇²f(x) + Σᵢ μᵢ∇²gᵢ(x)
-	    
-	    # Example for quadratic constraint sum(x[i]^2) = constant
-	    # The Hessian of this constraint is diagonal with 2 on each diagonal entry
-	    if !isempty(μ)
-	        n = length(x)
-	        idx = 1
-	        for i in 1:n
-	            for j in i:n
-	                if i == j  # Diagonal entry for quadratic constraint
-	                    # H[idx] += μ[1] * 2  # Add 2*μ[1] to diagonal
-	                end
-	                idx += 1
-	            end
-	        end
-	    end
-	    
-	    # Your analytical Lagrangian Hessian calculation goes here
-	    return nothing
-	end
+Compute the Frobenius norm-based error between a matrix A and its permutation P*A*P'.
+Uses optimized computation for different matrix types.
+"""
+function E(A::AbstractMatrix{T}, P::AbstractMatrix{T}) where T<:Number
+    # For large matrices, use BLAS operations directly
+    if isa(A, Matrix) && isa(P, Matrix) && length(A) > 1000
+        PA = similar(A)
+        mul!(PA, P, A)
+        PAP = similar(A)
+        mul!(PAP, PA, P')
+        
+        diff = A - PAP
+        return 0.25 * sum(abs2, diff)
+    else
+        # Standard computation for other cases
+        PAP = P * A * P'
+        return 0.25 * sum(abs2, A - PAP)
+    end
 end
 
-# ╔═╡ a2a5a2da-5a06-4d03-899b-2d50676ecad5
-begin
+# ╔═╡ d5ebc801-d2b7-4a85-83d2-003978eb236b
+"""
+    S(A::AbstractMatrix{T}, P::AbstractMatrix{T}, E::Union{Nothing,T}=nothing) where T<:Number
 
-	function G(
-		A::Matrix{T},
-		π::Vector{T},
-		P_result::Matrix{T}
-	) where T<:Real
-		P!(P_result, π)
-	    return F(A, P_result)
-	end
-
-	"""
-	    F!(A::Matrix{T}, π::Vector{T}) where T<:Real
-	
-	Calculate F(A,π) = G(A,P(π))
-	"""
-	function G(A::Matrix{T}, π::Vector{T}) where T<:Real
-	    return F(A, P(π))
-	end
-	
+Compute the normalized error S = 4*E/(n*(n-1)) where E is the permutation error.
+If E is not provided, it will be computed.
+"""
+function S(A::AbstractMatrix{T}, P::AbstractMatrix{T}) where T<:Number
+    n = size(A, 1)
+    return 4 * E(A, P) / (n * (n - 1))
 end
 
-# ╔═╡ 89f46bbd-d9df-4a79-9194-669bdcf3e358
-begin
-	function dFdp(A::Matrix, π::Vector)
-	    vec(dGdP(A, P(p)))' * dvecPdπ(p)
-	end
-	
-	function dFdπ!(
-		grad::Vector{T},
-		A::Matrix{T},
-		π::AbstractVector{T},
-		c::AbstractVector{T},
-		P_result::Matrix{T},
-		D::Matrix{T},
-		buffer::Matrix{T}
-	) where T<:Real
-		n = length(π)
-		
-		P!(P_result, π)
-		fill!(grad, zero(T))
-		dGdP!(D, A, P_result, c, buffer)
-	
-		for k in eachindex(grad)
-			for j in 1:n
-				grad[k] += D[k, j] * df(π[k] - j)
-			end
-		end
-		
-		return grad
-	end
-	
-end
+# ╔═╡ f5fb7b69-2c6e-48c7-8aaf-4bc296bb925e
+"""
+    to_permutation_matrix(perm::AbstractVector{Int})
 
-# ╔═╡ d05b092a-2bfd-457a-a30d-89f4addeca16
-begin
-	D = similar(A)
-	buffer = similar(A)
-	c = 0.2 * ones(4)
-	dGdP!(D, A, P(p), c, buffer)
-	grad = zeros(n)
-	P_result = similar(A)
-	dFdπ!(grad, A, p, c, P_result, D, buffer)
+Create an efficient representation of a permutation matrix based on the input size.
+Uses sparse matrices for large permutations.
+"""
+function to_permutation_matrix(perm::AbstractVector{Int})
+    n = length(perm)
+    
+    # Use sparse matrix for large permutations
+    if n > 100
+        I = 1:n
+        return sparse(I, perm, ones(Bool, n), n, n)
+    else
+        P = zeros(Bool, n, n)
+        @inbounds for (i, j) in enumerate(perm)
+            P[i, j] = true
+        end
+        return P
+    end
 end
 
 # ╔═╡ 00000000-0000-0000-0000-000000000001
 PLUTO_PROJECT_TOML_CONTENTS = """
 [deps]
+ForwardDiff = "f6369f11-7733-5829-9624-2563aa707210"
 Ipopt = "b6b21f68-93f8-5de0-b562-5493be1d77c9"
-JuMP = "4076af6c-e467-56ae-b986-b466b2749572"
 LazyArrays = "5078a376-72f3-5289-bfd5-ec5146d43c02"
 LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
 NPZ = "15e1cf62-19b3-5cfa-8e77-841668bca605"
+Optimization = "7f7a1694-90dd-40f0-9382-eb1efda571ba"
+OptimizationMOI = "fd9f6733-72f4-499f-8506-86b2bdd0dea1"
 Plots = "91a5bcdd-55d7-5caf-9e0b-520d859cae80"
+Random = "9a3f8284-a2c9-5f02-9a11-845980a1fd5c"
 SparseArrays = "2f01184e-e22b-5df5-ae63-d93ebab69eaf"
 Zygote = "e88e6eb3-aa80-5325-afca-941959d7151f"
 
 [compat]
+ForwardDiff = "~0.10.38"
 Ipopt = "~1.7.2"
-JuMP = "~1.24.0"
 LazyArrays = "~2.6.1"
 NPZ = "~0.4.3"
+Optimization = "~3.19.3"
+OptimizationMOI = "~0.1.12"
 Plots = "~1.40.9"
 Zygote = "~0.7.4"
 """
@@ -1193,7 +1163,12 @@ PLUTO_MANIFEST_TOML_CONTENTS = """
 
 julia_version = "1.11.3"
 manifest_format = "2.0"
-project_hash = "d55c351d04ad7dc7ebd28e6e137d3d26dc431057"
+project_hash = "cd69c37e75055eeca1a8226a3f2ec5fe857a1f3f"
+
+[[deps.ADTypes]]
+git-tree-sha1 = "016833eb52ba2d6bea9fcb50ca295980e728ee24"
+uuid = "47edcb42-4c32-4615-8424-f2b9edc5f35b"
+version = "0.2.7"
 
 [[deps.ASL_jll]]
 deps = ["Artifacts", "JLLWrappers", "Libdl", "Pkg"]
@@ -1211,6 +1186,35 @@ weakdeps = ["ChainRulesCore", "Test"]
     [deps.AbstractFFTs.extensions]
     AbstractFFTsChainRulesCoreExt = "ChainRulesCore"
     AbstractFFTsTestExt = "Test"
+
+[[deps.AbstractTrees]]
+git-tree-sha1 = "2d9c9a55f9c93e8887ad391fbae72f8ef55e1177"
+uuid = "1520ce14-60c1-5f80-bbc7-55ef81b5835c"
+version = "0.4.5"
+
+[[deps.Accessors]]
+deps = ["CompositionsBase", "ConstructionBase", "Dates", "InverseFunctions", "MacroTools"]
+git-tree-sha1 = "3b86719127f50670efe356bc11073d84b4ed7a5d"
+uuid = "7d9f7c33-5ae7-4f3b-8dc6-eff91059b697"
+version = "0.1.42"
+
+    [deps.Accessors.extensions]
+    AxisKeysExt = "AxisKeys"
+    IntervalSetsExt = "IntervalSets"
+    LinearAlgebraExt = "LinearAlgebra"
+    StaticArraysExt = "StaticArrays"
+    StructArraysExt = "StructArrays"
+    TestExt = "Test"
+    UnitfulExt = "Unitful"
+
+    [deps.Accessors.weakdeps]
+    AxisKeys = "94b1ba4f-4ee9-5380-92f1-94cde586c3c5"
+    IntervalSets = "8197267c-284f-5f27-9208-e0e47529a953"
+    LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
+    StaticArrays = "90137ffa-7385-5640-81b9-e52037218182"
+    StructArrays = "09ab397b-f2b6-538f-b94a-2f83cf4a842a"
+    Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
+    Unitful = "1986cc42-f94f-5a68-af5c-568840ba703d"
 
 [[deps.Adapt]]
 deps = ["LinearAlgebra", "Requires"]
@@ -1232,6 +1236,38 @@ version = "1.1.3"
 [[deps.ArgTools]]
 uuid = "0dad84c5-d112-42e6-8d28-ef12dabb789f"
 version = "1.1.2"
+
+[[deps.ArrayInterface]]
+deps = ["Adapt", "LinearAlgebra"]
+git-tree-sha1 = "017fcb757f8e921fb44ee063a7aafe5f89b86dd1"
+uuid = "4fba245c-0d91-5ea0-9b3e-6abc04ee57a9"
+version = "7.18.0"
+
+    [deps.ArrayInterface.extensions]
+    ArrayInterfaceBandedMatricesExt = "BandedMatrices"
+    ArrayInterfaceBlockBandedMatricesExt = "BlockBandedMatrices"
+    ArrayInterfaceCUDAExt = "CUDA"
+    ArrayInterfaceCUDSSExt = "CUDSS"
+    ArrayInterfaceChainRulesCoreExt = "ChainRulesCore"
+    ArrayInterfaceChainRulesExt = "ChainRules"
+    ArrayInterfaceGPUArraysCoreExt = "GPUArraysCore"
+    ArrayInterfaceReverseDiffExt = "ReverseDiff"
+    ArrayInterfaceSparseArraysExt = "SparseArrays"
+    ArrayInterfaceStaticArraysCoreExt = "StaticArraysCore"
+    ArrayInterfaceTrackerExt = "Tracker"
+
+    [deps.ArrayInterface.weakdeps]
+    BandedMatrices = "aae01518-5342-5314-be14-df237901396f"
+    BlockBandedMatrices = "ffab5731-97b5-5995-9138-79e8c1846df0"
+    CUDA = "052768ef-5323-5732-b1bb-66c8b64840ba"
+    CUDSS = "45b445bb-4962-46a0-9369-b4df9d0f772e"
+    ChainRules = "082447d4-558c-5d27-93f4-14fc19e9eca2"
+    ChainRulesCore = "d360d2e6-b24c-11e9-a2a3-2a2ae2dbcce4"
+    GPUArraysCore = "46192b85-c4d5-4398-a991-12ede77f4527"
+    ReverseDiff = "37e2e3b7-166d-5795-8a7a-e32c996b4267"
+    SparseArrays = "2f01184e-e22b-5df5-ae63-d93ebab69eaf"
+    StaticArraysCore = "1e83bf80-4336-4d27-bf5d-d5a4f845583c"
+    Tracker = "9f7883ad-71c0-57eb-9f7f-b5c9e6d3789c"
 
 [[deps.ArrayLayouts]]
 deps = ["FillArrays", "LinearAlgebra"]
@@ -1357,6 +1393,11 @@ git-tree-sha1 = "64e15186f0aa277e174aa81798f7eb8598e0157e"
 uuid = "5ae59095-9a9b-59fe-a467-6f913c188581"
 version = "0.13.0"
 
+[[deps.CommonSolve]]
+git-tree-sha1 = "0eee5eb66b1cf62cd6ad1b460238e60e4b09400c"
+uuid = "38540f10-b2f7-11e9-35d8-d573e4eb0ff2"
+version = "0.2.4"
+
 [[deps.CommonSubexpressions]]
 deps = ["MacroTools"]
 git-tree-sha1 = "cda2cfaebb4be89c9084adaca7dd7333369715c5"
@@ -1378,11 +1419,26 @@ deps = ["Artifacts", "Libdl"]
 uuid = "e66e0078-7015-5450-92f7-15fbd957f2ae"
 version = "1.1.1+0"
 
+[[deps.CompositionsBase]]
+git-tree-sha1 = "802bb88cd69dfd1509f6670416bd4434015693ad"
+uuid = "a33af91c-f02d-484b-be07-31d278c5ca2b"
+version = "0.1.2"
+weakdeps = ["InverseFunctions"]
+
+    [deps.CompositionsBase.extensions]
+    CompositionsBaseInverseFunctionsExt = "InverseFunctions"
+
 [[deps.ConcurrentUtilities]]
 deps = ["Serialization", "Sockets"]
 git-tree-sha1 = "d9d26935a0bcffc87d2613ce14c527c99fc543fd"
 uuid = "f0e56b4a-5159-44fe-b623-3e5288b988bb"
 version = "2.5.0"
+
+[[deps.ConsoleProgressMonitor]]
+deps = ["Logging", "ProgressMeter"]
+git-tree-sha1 = "3ab7b2136722890b9af903859afcf457fa3059e8"
+uuid = "88cd18e8-d9cc-4ea6-8889-5259c0d15c8b"
+version = "0.1.2"
 
 [[deps.ConstructionBase]]
 git-tree-sha1 = "76219f1ed5771adbb096743bff43fb5fdd4c1157"
@@ -1465,6 +1521,11 @@ deps = ["ArgTools", "FileWatching", "LibCURL", "NetworkOptions"]
 uuid = "f43a241f-c20a-4ad4-852c-f6b1247861c6"
 version = "1.6.0"
 
+[[deps.EnumX]]
+git-tree-sha1 = "bdb1942cd4c45e3c678fd11569d5cccd80976237"
+uuid = "4e289a0a-7415-4d19-859d-a7e5c4648b56"
+version = "1.0.4"
+
 [[deps.EpollShim_jll]]
 deps = ["Artifacts", "JLLWrappers", "Libdl"]
 git-tree-sha1 = "8a4be429317c42cfae6a7fc03c31bad1970c310d"
@@ -1482,6 +1543,16 @@ deps = ["Artifacts", "JLLWrappers", "Libdl"]
 git-tree-sha1 = "d55dffd9ae73ff72f1c0482454dcf2ec6c6c4a63"
 uuid = "2e619515-83b5-522b-bb60-26c02a35a201"
 version = "2.6.5+0"
+
+[[deps.ExprTools]]
+git-tree-sha1 = "27415f162e6028e81c72b82ef756bf321213b6ec"
+uuid = "e2ba6199-217a-4e67-a87a-7c52f15ade04"
+version = "0.1.10"
+
+[[deps.ExproniconLite]]
+git-tree-sha1 = "c13f0b150373771b0fdc1713c97860f8df12e6c2"
+uuid = "55351af7-c7e9-48d6-89ff-24e801d99491"
+version = "0.10.14"
 
 [[deps.FFMPEG]]
 deps = ["FFMPEG_jll"]
@@ -1564,6 +1635,17 @@ git-tree-sha1 = "846f7026a9decf3679419122b49f8a1fdb48d2d5"
 uuid = "559328eb-81f9-559d-9380-de523a88c83c"
 version = "1.0.16+0"
 
+[[deps.FunctionWrappers]]
+git-tree-sha1 = "d62485945ce5ae9c0c48f124a84998d755bae00e"
+uuid = "069b7b12-0de2-55c6-9aab-29f3d0a68a2e"
+version = "1.1.3"
+
+[[deps.FunctionWrappersWrappers]]
+deps = ["FunctionWrappers"]
+git-tree-sha1 = "b104d487b34566608f8b4e1c39fb0b10aa279ff8"
+uuid = "77dc65aa-8811-40c2-897b-53d922fa7daf"
+version = "0.1.3"
+
 [[deps.GLFW_jll]]
 deps = ["Artifacts", "JLLWrappers", "Libdl", "Libglvnd_jll", "Xorg_libXcursor_jll", "Xorg_libXi_jll", "Xorg_libXinerama_jll", "Xorg_libXrandr_jll", "libdecor_jll", "xkbcommon_jll"]
 git-tree-sha1 = "fcb0584ff34e25155876418979d4c8971243bb89"
@@ -1634,12 +1716,6 @@ git-tree-sha1 = "2eaa69a7cab70a52b9687c8bf950a5a93ec895ae"
 uuid = "076d061b-32b6-4027-95e0-9a2c6f6d7e74"
 version = "0.2.0"
 
-[[deps.Hwloc_jll]]
-deps = ["Artifacts", "JLLWrappers", "Libdl"]
-git-tree-sha1 = "f93a9ce66cd89c9ba7a4695a47fd93b4c6bc59fa"
-uuid = "e33a78d0-f292-5ffc-b300-72abe9b543c8"
-version = "2.12.0+0"
-
 [[deps.IRTools]]
 deps = ["InteractiveUtils", "MacroTools"]
 git-tree-sha1 = "950c3717af761bc3ff906c2e8e52bd83390b6ec2"
@@ -1651,6 +1727,16 @@ deps = ["Markdown"]
 uuid = "b77e0a4c-d291-57a0-90e8-8db25a27a240"
 version = "1.11.0"
 
+[[deps.InverseFunctions]]
+git-tree-sha1 = "a779299d77cd080bf77b97535acecd73e1c5e5cb"
+uuid = "3587e190-3f89-42d0-90ee-14403ec27112"
+version = "0.1.17"
+weakdeps = ["Dates", "Test"]
+
+    [deps.InverseFunctions.extensions]
+    InverseFunctionsDatesExt = "Dates"
+    InverseFunctionsTestExt = "Test"
+
 [[deps.Ipopt]]
 deps = ["Ipopt_jll", "LinearAlgebra", "MathOptInterface", "OpenBLAS32_jll", "PrecompileTools"]
 git-tree-sha1 = "edcc4d1ec92e1abb5ebadc81b306c69ed58f53e2"
@@ -1658,10 +1744,10 @@ uuid = "b6b21f68-93f8-5de0-b562-5493be1d77c9"
 version = "1.7.2"
 
 [[deps.Ipopt_jll]]
-deps = ["ASL_jll", "Artifacts", "CompilerSupportLibraries_jll", "JLLWrappers", "Libdl", "MUMPS_seq_jll", "SPRAL_jll", "libblastrampoline_jll"]
-git-tree-sha1 = "4f55ad688c698a4f77d892a1cb673f7e8a30f178"
+deps = ["ASL_jll", "Artifacts", "CompilerSupportLibraries_jll", "JLLWrappers", "Libdl", "MUMPS_seq_jll", "OpenBLAS32_jll", "Pkg"]
+git-tree-sha1 = "e3e202237d93f18856b6ff1016166b0f172a49a8"
 uuid = "9cc047cb-c261-5740-88fc-0cf96f7bdcc7"
-version = "300.1400.1700+0"
+version = "300.1400.400+0"
 
 [[deps.IrrationalConstants]]
 git-tree-sha1 = "e2222959fbc6c19554dc15174c81bf7bf3aa691c"
@@ -1703,23 +1789,17 @@ version = "1.14.1"
     [deps.JSON3.weakdeps]
     ArrowTypes = "31f734f8-188a-4ce0-8406-c8a06bd891cd"
 
+[[deps.Jieko]]
+deps = ["ExproniconLite"]
+git-tree-sha1 = "2f05ed29618da60c06a87e9c033982d4f71d0b6c"
+uuid = "ae98c720-c025-4a4a-838c-29b094483192"
+version = "0.2.1"
+
 [[deps.JpegTurbo_jll]]
 deps = ["Artifacts", "JLLWrappers", "Libdl"]
 git-tree-sha1 = "eac1206917768cb54957c65a615460d87b455fc1"
 uuid = "aacddb02-875f-59d6-b918-886e6ef4fbf8"
 version = "3.1.1+0"
-
-[[deps.JuMP]]
-deps = ["LinearAlgebra", "MacroTools", "MathOptInterface", "MutableArithmetics", "OrderedCollections", "PrecompileTools", "Printf", "SparseArrays"]
-git-tree-sha1 = "cf832644f225dbe721bb9b97bf432007765fc695"
-uuid = "4076af6c-e467-56ae-b986-b466b2749572"
-version = "1.24.0"
-
-    [deps.JuMP.extensions]
-    JuMPDimensionalDataExt = "DimensionalData"
-
-    [deps.JuMP.weakdeps]
-    DimensionalData = "0703355e-b756-11e9-17c0-8b28908087d0"
 
 [[deps.KernelAbstractions]]
 deps = ["Adapt", "Atomix", "InteractiveUtils", "MacroTools", "PrecompileTools", "Requires", "StaticArrays", "UUIDs"]
@@ -1822,6 +1902,12 @@ version = "2.6.1"
 deps = ["Artifacts", "Pkg"]
 uuid = "4af54fe1-eca0-43a8-85a7-787d91b784e3"
 version = "1.11.0"
+
+[[deps.LeftChildRightSiblingTrees]]
+deps = ["AbstractTrees"]
+git-tree-sha1 = "fb6803dafae4a5d62ea5cab204b1e657d9737e7f"
+uuid = "1d6d02ad-be62-4b6b-8a6d-2f90e265016e"
+version = "0.2.0"
 
 [[deps.LibCURL]]
 deps = ["LibCURL_jll", "MozillaCACerts_jll"]
@@ -1938,10 +2024,10 @@ uuid = "d00139f3-1899-568f-a2f0-47f597d42d70"
 version = "5.1.3+0"
 
 [[deps.MUMPS_seq_jll]]
-deps = ["Artifacts", "CompilerSupportLibraries_jll", "JLLWrappers", "Libdl", "METIS_jll", "libblastrampoline_jll"]
-git-tree-sha1 = "0eab12f94948ca67908aec14b9f2ebefd17463fe"
+deps = ["Artifacts", "CompilerSupportLibraries_jll", "JLLWrappers", "Libdl", "METIS_jll", "OpenBLAS32_jll", "Pkg"]
+git-tree-sha1 = "29de2841fa5aefe615dea179fcde48bb87b58f57"
 uuid = "d7ed1dd3-d0ae-5e8e-bfb4-87a502085b8d"
-version = "500.700.301+0"
+version = "5.4.1+0"
 
 [[deps.MacroTools]]
 git-tree-sha1 = "72aebe0b5051e5143a079a4685a46da330a40472"
@@ -1955,9 +2041,9 @@ version = "1.11.0"
 
 [[deps.MathOptInterface]]
 deps = ["BenchmarkTools", "CodecBzip2", "CodecZlib", "DataStructures", "ForwardDiff", "JSON3", "LinearAlgebra", "MutableArithmetics", "NaNMath", "OrderedCollections", "PrecompileTools", "Printf", "SparseArrays", "SpecialFunctions", "Test"]
-git-tree-sha1 = "098fafb5e7eb6ad99b7b2c9464323759183aa0f3"
+git-tree-sha1 = "b691a4b4c8ef7a4fba051d546040bfd2ae6f0719"
 uuid = "b8f27783-ece8-5eb3-8dc8-9495eed66fee"
-version = "1.37.0"
+version = "1.37.2"
 
 [[deps.MbedTLS]]
 deps = ["Dates", "MbedTLS_jll", "MozillaCACerts_jll", "NetworkOptions", "Random", "Sockets"]
@@ -1984,6 +2070,12 @@ version = "1.2.0"
 [[deps.Mmap]]
 uuid = "a63ad114-7e13-5084-954f-fe012c677804"
 version = "1.11.0"
+
+[[deps.Moshi]]
+deps = ["ExproniconLite", "Jieko"]
+git-tree-sha1 = "453de0fc2be3d11b9b93ca4d0fddd91196dcf1ed"
+uuid = "2e0e35c7-a2e4-4343-998d-7ef72827ed2d"
+version = "0.3.5"
 
 [[deps.MozillaCACerts_jll]]
 uuid = "14a3606d-f60d-562e-9121-12d972cd8159"
@@ -2050,6 +2142,39 @@ deps = ["Artifacts", "CompilerSupportLibraries_jll", "JLLWrappers", "Libdl"]
 git-tree-sha1 = "1346c9208249809840c91b26703912dff463d335"
 uuid = "efe28fd5-8261-553b-a9e1-b2916fc3738e"
 version = "0.5.6+0"
+
+[[deps.Optimization]]
+deps = ["ADTypes", "ArrayInterface", "ConsoleProgressMonitor", "DocStringExtensions", "LinearAlgebra", "Logging", "LoggingExtras", "Pkg", "Printf", "ProgressLogging", "Reexport", "Requires", "SciMLBase", "SparseArrays", "TerminalLoggers"]
+git-tree-sha1 = "1aa7ffea6e171167e9cae620d749e16d5874414a"
+uuid = "7f7a1694-90dd-40f0-9382-eb1efda571ba"
+version = "3.19.3"
+
+    [deps.Optimization.extensions]
+    OptimizationEnzymeExt = "Enzyme"
+    OptimizationFiniteDiffExt = "FiniteDiff"
+    OptimizationForwardDiffExt = "ForwardDiff"
+    OptimizationMTKExt = "ModelingToolkit"
+    OptimizationReverseDiffExt = "ReverseDiff"
+    OptimizationSparseDiffExt = ["SparseDiffTools", "Symbolics", "ReverseDiff"]
+    OptimizationTrackerExt = "Tracker"
+    OptimizationZygoteExt = "Zygote"
+
+    [deps.Optimization.weakdeps]
+    Enzyme = "7da242da-08ed-463a-9acd-ee780be4f1d9"
+    FiniteDiff = "6a86dc24-6348-571c-b903-95158fe2bd41"
+    ForwardDiff = "f6369f11-7733-5829-9624-2563aa707210"
+    ModelingToolkit = "961ee093-0014-501f-94e3-6117800e7a78"
+    ReverseDiff = "37e2e3b7-166d-5795-8a7a-e32c996b4267"
+    SparseDiffTools = "47a9eef4-7e08-11e9-0b38-333d64bd3804"
+    Symbolics = "0c5d862f-8b57-4792-8d23-62f2024744c7"
+    Tracker = "9f7883ad-71c0-57eb-9f7f-b5c9e6d3789c"
+    Zygote = "e88e6eb3-aa80-5325-afca-941959d7151f"
+
+[[deps.OptimizationMOI]]
+deps = ["Ipopt_jll", "MathOptInterface", "Optimization", "Reexport", "SparseArrays"]
+git-tree-sha1 = "6078c5864fc3ab80e7fba1e0ea2258ac23fef56d"
+uuid = "fd9f6733-72f4-499f-8506-86b2bdd0dea1"
+version = "0.1.12"
 
 [[deps.Opus_jll]]
 deps = ["Artifacts", "JLLWrappers", "Libdl"]
@@ -2152,6 +2277,18 @@ version = "1.11.0"
 uuid = "9abbd945-dff8-562f-b5e8-e1ebf5ef1b79"
 version = "1.11.0"
 
+[[deps.ProgressLogging]]
+deps = ["Logging", "SHA", "UUIDs"]
+git-tree-sha1 = "80d919dee55b9c50e8d9e2da5eeafff3fe58b539"
+uuid = "33c8b6b6-d38a-422a-b730-caa89a2f386c"
+version = "0.1.4"
+
+[[deps.ProgressMeter]]
+deps = ["Distributed", "Printf"]
+git-tree-sha1 = "8f6bc219586aef8baf0ff9a5fe16ee9c70cb65e4"
+uuid = "92933f4c-e287-5a05-a399-4b506db050ca"
+version = "1.10.2"
+
 [[deps.PtrArrays]]
 git-tree-sha1 = "1d36ef11a9aaf1e8b74dacc6a731dd1de8fd493d"
 uuid = "43287f4e-b6f4-7ad1-bb20-aadabca52c3d"
@@ -2209,6 +2346,34 @@ git-tree-sha1 = "45cf9fd0ca5839d06ef333c8201714e888486342"
 uuid = "01d81517-befc-4cb6-b9ec-a95719d0359c"
 version = "0.6.12"
 
+[[deps.RecursiveArrayTools]]
+deps = ["Adapt", "ArrayInterface", "DocStringExtensions", "GPUArraysCore", "IteratorInterfaceExtensions", "LinearAlgebra", "RecipesBase", "StaticArraysCore", "Statistics", "SymbolicIndexingInterface", "Tables"]
+git-tree-sha1 = "e96b644f7bfbf1015f8e42a7c7abfae2a48fafbf"
+uuid = "731186ca-8d62-57ce-b412-fbd966d074cd"
+version = "3.31.0"
+
+    [deps.RecursiveArrayTools.extensions]
+    RecursiveArrayToolsFastBroadcastExt = "FastBroadcast"
+    RecursiveArrayToolsForwardDiffExt = "ForwardDiff"
+    RecursiveArrayToolsMeasurementsExt = "Measurements"
+    RecursiveArrayToolsMonteCarloMeasurementsExt = "MonteCarloMeasurements"
+    RecursiveArrayToolsReverseDiffExt = ["ReverseDiff", "Zygote"]
+    RecursiveArrayToolsSparseArraysExt = ["SparseArrays"]
+    RecursiveArrayToolsStructArraysExt = "StructArrays"
+    RecursiveArrayToolsTrackerExt = "Tracker"
+    RecursiveArrayToolsZygoteExt = "Zygote"
+
+    [deps.RecursiveArrayTools.weakdeps]
+    FastBroadcast = "7034ab61-46d4-4ed7-9d0f-46aef9175898"
+    ForwardDiff = "f6369f11-7733-5829-9624-2563aa707210"
+    Measurements = "eff96d63-e80a-5855-80a2-b1b0885c5ab7"
+    MonteCarloMeasurements = "0987c9cc-fe09-11e8-30f0-b96dd679fdca"
+    ReverseDiff = "37e2e3b7-166d-5795-8a7a-e32c996b4267"
+    SparseArrays = "2f01184e-e22b-5df5-ae63-d93ebab69eaf"
+    StructArrays = "09ab397b-f2b6-538f-b94a-2f83cf4a842a"
+    Tracker = "9f7883ad-71c0-57eb-9f7f-b5c9e6d3789c"
+    Zygote = "e88e6eb3-aa80-5325-afca-941959d7151f"
+
 [[deps.Reexport]]
 git-tree-sha1 = "45e428421666073eab6f2da5c9d310d99bb12f9b"
 uuid = "189a3867-3050-52da-a836-e630ba90ab69"
@@ -2226,15 +2391,59 @@ git-tree-sha1 = "62389eeff14780bfe55195b7204c0d8738436d64"
 uuid = "ae029012-a4dd-5104-9daa-d747884805df"
 version = "1.3.1"
 
+[[deps.RuntimeGeneratedFunctions]]
+deps = ["ExprTools", "SHA", "Serialization"]
+git-tree-sha1 = "04c968137612c4a5629fa531334bb81ad5680f00"
+uuid = "7e49a35a-f44a-4d26-94aa-eba1b4ca6b47"
+version = "0.5.13"
+
 [[deps.SHA]]
 uuid = "ea8e919c-243c-51af-8825-aaa63cd721ce"
 version = "0.7.0"
 
-[[deps.SPRAL_jll]]
-deps = ["Artifacts", "CompilerSupportLibraries_jll", "Hwloc_jll", "JLLWrappers", "Libdl", "METIS_jll", "libblastrampoline_jll"]
-git-tree-sha1 = "11f3da4b25efacd1cec8e263421f2a9003a5e8e0"
-uuid = "319450e9-13b8-58e8-aa9f-8fd1420848ab"
-version = "2024.5.8+0"
+[[deps.SciMLBase]]
+deps = ["ADTypes", "Accessors", "ArrayInterface", "CommonSolve", "ConstructionBase", "Distributed", "DocStringExtensions", "EnumX", "FunctionWrappersWrappers", "IteratorInterfaceExtensions", "LinearAlgebra", "Logging", "Markdown", "Moshi", "PrecompileTools", "Preferences", "Printf", "RecipesBase", "RecursiveArrayTools", "Reexport", "RuntimeGeneratedFunctions", "SciMLOperators", "SciMLStructures", "StaticArraysCore", "Statistics", "SymbolicIndexingInterface"]
+git-tree-sha1 = "ee305515b0946db5f56af699e8b5804fee04146c"
+uuid = "0bca4576-84f4-4d90-8ffe-ffa030f20462"
+version = "2.75.1"
+
+    [deps.SciMLBase.extensions]
+    SciMLBaseChainRulesCoreExt = "ChainRulesCore"
+    SciMLBaseMLStyleExt = "MLStyle"
+    SciMLBaseMakieExt = "Makie"
+    SciMLBasePartialFunctionsExt = "PartialFunctions"
+    SciMLBasePyCallExt = "PyCall"
+    SciMLBasePythonCallExt = "PythonCall"
+    SciMLBaseRCallExt = "RCall"
+    SciMLBaseZygoteExt = "Zygote"
+
+    [deps.SciMLBase.weakdeps]
+    ChainRules = "082447d4-558c-5d27-93f4-14fc19e9eca2"
+    ChainRulesCore = "d360d2e6-b24c-11e9-a2a3-2a2ae2dbcce4"
+    MLStyle = "d8e11817-5142-5d16-987a-aa16d5891078"
+    Makie = "ee78f7c6-11fb-53f2-987a-cfe4a2b5a57a"
+    PartialFunctions = "570af359-4316-4cb7-8c74-252c00c2016b"
+    PyCall = "438e738f-606a-5dbb-bf0a-cddfbfd45ab0"
+    PythonCall = "6099a3de-0909-46bc-b1f4-468b9a2dfc0d"
+    RCall = "6f49c342-dc21-5d91-9882-a32aef131414"
+    Zygote = "e88e6eb3-aa80-5325-afca-941959d7151f"
+
+[[deps.SciMLOperators]]
+deps = ["Accessors", "ArrayInterface", "DocStringExtensions", "LinearAlgebra", "MacroTools"]
+git-tree-sha1 = "6149620767866d4b0f0f7028639b6e661b6a1e44"
+uuid = "c0aeaf25-5076-4817-a8d5-81caf7dfa961"
+version = "0.3.12"
+weakdeps = ["SparseArrays", "StaticArraysCore"]
+
+    [deps.SciMLOperators.extensions]
+    SciMLOperatorsSparseArraysExt = "SparseArrays"
+    SciMLOperatorsStaticArraysCoreExt = "StaticArraysCore"
+
+[[deps.SciMLStructures]]
+deps = ["ArrayInterface"]
+git-tree-sha1 = "566c4ed301ccb2a44cbd5a27da5f885e0ed1d5df"
+uuid = "53ae85a6-f571-4167-b2af-e1d143709226"
+version = "1.7.0"
 
 [[deps.ScopedValues]]
 deps = ["HashArrayMappedTries", "Logging"]
@@ -2371,6 +2580,12 @@ deps = ["Artifacts", "Libdl", "libblastrampoline_jll"]
 uuid = "bea87d4a-7f5b-5778-9afe-8cc45184846c"
 version = "7.7.0+0"
 
+[[deps.SymbolicIndexingInterface]]
+deps = ["Accessors", "ArrayInterface", "RuntimeGeneratedFunctions", "StaticArraysCore"]
+git-tree-sha1 = "d6c04e26aa1c8f7d144e1a8c47f1c73d3013e289"
+uuid = "2efcf032-c050-4f8e-a9bb-153293bab1f5"
+version = "0.3.38"
+
 [[deps.TOML]]
 deps = ["Dates"]
 uuid = "fa267f1f-6049-4f14-aa54-33bafae1ed76"
@@ -2398,6 +2613,12 @@ deps = ["LinearAlgebra"]
 git-tree-sha1 = "1feb45f88d133a655e001435632f019a9a1bcdb6"
 uuid = "62fd8b95-f654-4bbd-a8a5-9c27f68ccd50"
 version = "0.1.1"
+
+[[deps.TerminalLoggers]]
+deps = ["LeftChildRightSiblingTrees", "Logging", "Markdown", "Printf", "ProgressLogging", "UUIDs"]
+git-tree-sha1 = "f133fab380933d042f6796eda4e130272ba520ca"
+uuid = "5d786b92-1e48-4d6f-9151-6b4477ca9bed"
+version = "0.1.7"
 
 [[deps.Test]]
 deps = ["InteractiveUtils", "Logging", "Random", "Serialization"]
@@ -2434,14 +2655,11 @@ deps = ["Dates", "LinearAlgebra", "Random"]
 git-tree-sha1 = "c0667a8e676c53d390a09dc6870b3d8d6650e2bf"
 uuid = "1986cc42-f94f-5a68-af5c-568840ba703d"
 version = "1.22.0"
+weakdeps = ["ConstructionBase", "InverseFunctions"]
 
     [deps.Unitful.extensions]
     ConstructionBaseUnitfulExt = "ConstructionBase"
     InverseFunctionsUnitfulExt = "InverseFunctions"
-
-    [deps.Unitful.weakdeps]
-    ConstructionBase = "187b0558-2788-49d3-abe0-74a17ed4e7c9"
-    InverseFunctions = "3587e190-3f89-42d0-90ee-14403ec27112"
 
 [[deps.UnitfulLatexify]]
 deps = ["LaTeXStrings", "Latexify", "Unitful"]
@@ -2798,7 +3016,7 @@ version = "1.4.1+2"
 # ╠═dfe3e0c7-c65e-47c9-8362-37e0ce3d555d
 # ╟─e9399db5-cd3e-4d15-9b39-e81c121c475d
 # ╠═b5e6dc4c-58b5-4f93-88fd-5faf47eac6dc
-# ╟─dfe481fd-f10e-4458-bfcb-d6b32f025f79
+# ╠═dfe481fd-f10e-4458-bfcb-d6b32f025f79
 # ╟─0ab716c2-0c36-44ec-8aa7-60b275a936b8
 # ╟─33557962-738e-4b59-b671-bef07aa3f6e0
 # ╠═6d482735-8577-4d36-b549-7a65244198a2
@@ -2811,11 +3029,13 @@ version = "1.4.1+2"
 # ╟─0592a253-a759-4ea6-ae1b-1aba8a0725ce
 # ╟─a1d7ece9-0e6d-40be-82f9-a06a2cecbd0b
 # ╟─0fdbe7aa-6006-4543-a273-3fb2027df420
-# ╠═6381946b-49fd-4541-aaab-5e58915aa984
+# ╟─6381946b-49fd-4541-aaab-5e58915aa984
 # ╠═bdc2bde2-917f-4ec2-9043-8b40d68377ac
 # ╠═f8a80a32-7d76-4cbb-b317-275efceba2f5
 # ╠═33783c65-92f4-428a-a619-5f2c701c0e23
 # ╠═a2a5a2da-5a06-4d03-899b-2d50676ecad5
+# ╠═25856686-763d-484a-8fc6-3575984e2b84
+# ╠═e5853062-bf57-43c7-b242-1f21fddf4000
 # ╟─19745ff7-e06a-4add-9e2c-05945d2920e3
 # ╟─0a9f5275-0edb-408c-b082-2e41102b6341
 # ╟─78a81278-1f3f-4649-aea0-154bd5430eba
@@ -2824,24 +3044,24 @@ version = "1.4.1+2"
 # ╠═62a00bef-7011-492c-8437-60b6c402d0b5
 # ╠═f731520a-7e50-4949-a67c-d7094dacaa2f
 # ╠═293b0b45-1e62-492b-be49-2fa77e847a81
+# ╠═252d6270-7e58-47f3-acef-f340e74e187f
 # ╠═89f46bbd-d9df-4a79-9194-669bdcf3e358
+# ╠═e9751b4b-e60d-4764-adee-7e5b7d69b82e
 # ╠═d05b092a-2bfd-457a-a30d-89f4addeca16
 # ╟─b02ec8d6-4aaa-42f3-b04f-46ff6ca338bb
 # ╟─90ff1dc8-6211-4809-ae0c-6d5c51aeae64
-# ╠═2b9c5c09-9932-41c2-8812-f038d87f0e09
 # ╠═59a251e0-8844-41bb-a794-d052b5764f73
-# ╠═a49684e8-e944-44cd-b1b9-a171d3296ba1
-# ╠═20c3d381-3a4b-43d7-8f11-d710d5ad5b53
-# ╠═dcab1607-b13e-4bd3-bfd7-200a24b0b92f
-# ╠═e912f13b-59f7-4dd8-b802-8a8eaf8db755
-# ╠═48a490b5-3036-40ec-b420-4ce0c86d5e89
-# ╠═060d7b07-8f4b-40a3-b2c2-aebde3cb40ff
-# ╠═16aa7807-d0ca-41b6-84b2-59f47eb18fc8
-# ╠═d62d2ac1-6e88-4083-af50-3a206ed14418
+# ╟─b21e1363-eed9-4b68-9f76-30b565105fe6
 # ╠═e9702fca-1a93-4ca8-9c8a-51374cf9cf88
+# ╠═0be4b97f-f650-4252-92a9-babfa56891b4
 # ╠═527799b7-7e50-4483-8b1e-c0d861b2946f
-# ╟─d901a80d-5fa0-4599-8fae-45d8dcd7ef00
-# ╠═a5591c79-1672-408b-bc53-b59b377c4ad8
+# ╠═a1dbfa99-cbb8-4454-8a56-6631fa1a2227
+# ╠═5beae2d2-ff34-43ca-8bd6-dc91cb826b8e
+# ╠═50b72c53-41e9-4cce-93fb-3e1e85d18169
+# ╟─d44bc887-f755-40ff-bf18-5cfd07259fe3
 # ╟─9f972bc2-4405-4abd-af23-2669855c1e2b
+# ╟─406dc427-e8eb-46a4-b9b8-0c80a42d0870
+# ╟─d5ebc801-d2b7-4a85-83d2-003978eb236b
+# ╟─f5fb7b69-2c6e-48c7-8aaf-4bc296bb925e
 # ╟─00000000-0000-0000-0000-000000000001
 # ╟─00000000-0000-0000-0000-000000000002
