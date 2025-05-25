@@ -20,7 +20,6 @@ class DoublyStochastic(Manifold):
             - "simple": First-order retraction X + eta
             - "sinkhorn": Exponential-based with Sinkhorn projection (default)
         max_sinkhorn_iters: Maximum iterations for Sinkhorn-Knopp algorithm.
-        use_pcg: Use preconditioned conjugate gradient for large problems.
         pcg_threshold: Use PCG solver when n exceeds this threshold.
 
     Note:
@@ -40,13 +39,11 @@ class DoublyStochastic(Manifold):
         *,
         retraction_method: str = "sinkhorn",
         max_sinkhorn_iters: Optional[int] = None,
-        use_pcg: bool = True,
         pcg_threshold: int = 100,
     ):
         self._n = n
         self._retraction_method = retraction_method
         self._max_sinkhorn_iters = max_sinkhorn_iters or (1000 + 2 * n)
-        self._use_pcg = use_pcg
         self._pcg_threshold = pcg_threshold
 
         name = f"Doubly stochastic manifold DS({n})"
@@ -176,33 +173,23 @@ class DoublyStochastic(Manifold):
         return self.projection(point_b, tangent_vector_a)
 
     def _linear_solve(self, point, b):
-        """Solve linear system for projection computation."""
         n = self._n
-
-        if n < self._pcg_threshold or not self._use_pcg:
-            # Direct solve for small problems
-            # Build system matrix [I X; X' I]
-            A = np.block([[np.eye(n), point], [point.T, np.eye(n)]])
-            x = np.linalg.solve(A, b)
-            return x[:n], x[n:]
-        else:
-            # Use PCG for large problems
-            def matvec(x):
-                """Matrix-vector product without forming full matrix."""
-                x_top = x[:n]
-                x_bottom = x[n:]
-                return np.concatenate(
-                    [x_top + point @ x_bottom, point.T @ x_top + x_bottom]
-                )
-
-            # Create linear operator
-            A_op = scipy.sparse.linalg.LinearOperator(
-                shape=(2 * n, 2 * n), matvec=matvec, dtype=point.dtype
-            )
-
-            # Solve with PCG
-            x, _ = scipy.sparse.linalg.cg(A_op, b, maxiter=100)
-            return x[:n], x[n:]
+        
+        # Split b into components
+        Z1 = b[:n]  # sum(Z, axis=1) 
+        ZT1 = b[n:]  # sum(Z, axis=0)
+        
+        # Compute (I - XX^T)
+        I_minus_XXT = np.eye(n) - point @ point.T
+        
+        # Compute alpha using pseudo-inverse
+        # alpha = (I - XX^T)^† (Z1 - X*Z^T*1)
+        alpha = np.linalg.pinv(I_minus_XXT) @ (Z1 - point @ ZT1)
+        
+        # Compute beta
+        beta = ZT1 - point.T @ alpha
+        
+        return alpha, beta
 
     def _doubly_stochastic(self, X, tol=1e-8):
         """Project matrix to doubly stochastic using Sinkhorn-Knopp algorithm."""

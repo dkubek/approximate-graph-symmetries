@@ -23,7 +23,11 @@ def matrix_power(matrix: torch.Tensor, s: float) -> torch.Tensor:
     return torch.real(result)
 
 
-def matching(orth_matrix: torch.Tensor, constraint: Optional[torch.Tensor] = None, maximize: bool = True) -> torch.Tensor:
+def matching(
+    orth_matrix: torch.Tensor,
+    constraint: Optional[torch.Tensor] = None,
+    maximize: bool = True,
+) -> torch.Tensor:
     """
     Solves the linear assignment problem using the provided orthogonal matrix.
 
@@ -46,6 +50,7 @@ def matching(orth_matrix: torch.Tensor, constraint: Optional[torch.Tensor] = Non
         col_idxs = batch_linear_assignment(matrix)
     return create_perm_matrix(col_idxs)
 
+
 def create_perm_matrix(indx: torch.Tensor) -> torch.Tensor:
     """
     Creates a permutation matrix from given indices.
@@ -63,7 +68,7 @@ def create_perm_matrix(indx: torch.Tensor) -> torch.Tensor:
     perm_matrix[torch.arange(batch_size, device=device).unsqueeze(1), rows, indx] = 1
     return perm_matrix
 
-    
+
 def generate_random_orthogonal_matrix(batch_size: int, n: int) -> torch.Tensor:
     """
     Generates a batch of random orthogonal matrices.

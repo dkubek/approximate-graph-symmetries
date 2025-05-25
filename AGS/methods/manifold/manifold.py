@@ -14,8 +14,8 @@ class Manifold:
     def __init__(
         self,
         optimizer="steepest_descent",
-        max_iterations=500,
-        verbosity=1,
+        max_iter=500,
+        verbose=1,
         **optimizer_kwargs,
     ):
         """
@@ -26,14 +26,14 @@ class Manifold:
         """
 
         self.optimizer = optimizer
-        self.max_iterations = max_iterations
+        self.max_iter = max_iter
         self.optimizer_kwargs = optimizer_kwargs
 
-        self.verbosity = verbosity
+        self.verbose = verbose
 
         self.dtype = torch.float64
         self.device = "cpu"
-        if self.verbosity > 0:
+        if self.verbose > 0:
             print(f"Using {self.device} device")
 
     def solve(
@@ -95,20 +95,20 @@ class Manifold:
         # Choose and configure optimizer
         if self.optimizer == "trust_regions":
             opt = TrustRegions(
-                max_iterations=self.max_iterations,
-                verbosity=self.verbosity,
+                max_iterations=self.max_iter,
+                verbosity=self.verbose,
                 **self.optimizer_kwargs,
             )
         elif self.optimizer == "steepest_descent":
             opt = SteepestDescent(
-                max_iterations=self.max_iterations,
-                verbosity=self.verbosity,
+                max_iterations=self.max_iter,
+                verbosity=self.verbose,
                 **self.optimizer_kwargs,
             )
         elif self.optimizer == "conjugate_gradient":
             opt = ConjugateGradient(
-                max_iterations=self.max_iterations,
-                verbosity=self.verbosity,
+                max_iterations=self.max_iter,
+                verbosity=self.verbose,
                 **self.optimizer_kwargs,
             )
         else:

@@ -44,7 +44,7 @@ def soft_sort(s, tau):
 class SoftSort:
     def __init__(
         self,
-        max_iterations=2000,
+        max_iter=2000,
         initial_tau=1,
         final_tau=1e-6,
         annealing_scheme="cosine",
@@ -65,13 +65,13 @@ class SoftSort:
         min_rel_improvement: Minimum relative improvement to reset patience
         """
 
-        self.max_iterations = max_iterations
+        self.max_iter = max_iter
         self.learning_rate = learning_rate
 
         self.initial_tau = initial_tau
         self.final_tau = final_tau
         self.annealing_scheme = annealing_scheme
-        self.decay_steps = decay_steps or max_iterations
+        self.decay_steps = decay_steps or max_iter
 
         self.min_rel_improvement = min_rel_improvement
 
@@ -137,7 +137,7 @@ class SoftSort:
         best_loss = float("inf")
         best_s = s
 
-        pbar = tqdm(range(self.max_iterations), disable=(self.verbose < 1))
+        pbar = tqdm(range(self.max_iter), disable=(self.verbose < 1))
         start_time = time()
         for i in pbar:
             # Compute current tau using the annealing function
@@ -170,7 +170,7 @@ class SoftSort:
             pbar.set_description(f"Loss: {loss_val.item():.6f}, Tau: {current_tau:.4f}")
 
             if loss_val < 1e-5:
-                print(f"Converged to target threshold at iteration {i+1}")
+                print(f"Converged to target threshold at iteration {i + 1}")
                 break
 
         end_time = time()

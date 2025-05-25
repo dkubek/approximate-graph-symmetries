@@ -9,7 +9,7 @@ from .OT4P.ot4p import OT4P
 class OT4P4AS:
     def __init__(
         self,
-        max_iterations=3000,
+        max_iter=3000,
         initial_tau=0.7,
         final_tau=0.5,
         annealing_scheme="exponential",
@@ -30,13 +30,13 @@ class OT4P4AS:
         min_rel_improvement: Minimum relative improvement to reset patience
         """
 
-        self.max_iterations = max_iterations
+        self.max_iter = max_iter
         self.learning_rate = learning_rate
 
         self.initial_tau = initial_tau
         self.final_tau = final_tau
         self.annealing_scheme = annealing_scheme
-        self.decay_steps = decay_steps or max_iterations
+        self.decay_steps = decay_steps or max_iter
 
         self.min_rel_improvement = min_rel_improvement
 
@@ -61,11 +61,11 @@ class OT4P4AS:
         diag_elements = torch.diagonal(P, dim1=-2, dim2=-1)
         positive_diags = torch.pow(diag_elements, 2)
         penalty = torch.sqrt(torch.sum(c * positive_diags))
-        
-        return quadratic_term + penalty 
+
+        return quadratic_term + penalty
 
     def _loss_norm(self, A, P, c):
-        #return torch.sqrt(torch.sum(torch.pow(P @ X @ P.transpose(-2, -1) - Y, 2))) + penalty
+        # return torch.sqrt(torch.sum(torch.pow(P @ X @ P.transpose(-2, -1) - Y, 2))) + penalty
         quadratic_term = torch.mean(torch.pow(P @ A @ P.transpose(-2, -1) - A, 2))
 
         diag_elements = torch.diagonal(P, dim1=-2, dim2=-1)
@@ -108,14 +108,16 @@ class OT4P4AS:
         c = torch.from_numpy(c.astype(float)).to(device=self.device, dtype=self.dtype)
 
         model = OT4P(n).to(device=self.device, dtype=self.dtype)
-        weightP = torch.nn.Parameter(torch.rand_like(A, device=self.device, dtype=self.dtype), requires_grad=True)
+        weightP = torch.nn.Parameter(
+            torch.rand_like(A, device=self.device, dtype=self.dtype), requires_grad=True
+        )
         optimizer = torch.optim.AdamW([weightP], lr=self.learning_rate)
-        
+
         # Initialize tracking variables
-        best_loss = float('inf')
+        best_loss = float("inf")
         best_weight = weightP.clone().detach()
 
-        pbar = tqdm(range(self.max_iterations), disable=(self.verbose < 1))
+        pbar = tqdm(range(self.max_iter), disable=(self.verbose < 1))
         start_time = time()
         for i in pbar:
             current_tau = get_annealing_tau(
@@ -138,7 +140,7 @@ class OT4P4AS:
             with torch.no_grad():
                 perm_matrix_val = model(weightP, tau=0)
                 loss_val = self.loss(A, perm_matrix_val, c)
-            
+
             # Check for improvement
             if loss_val < best_loss * (1 - self.min_rel_improvement):
                 best_loss = loss_val
@@ -146,12 +148,12 @@ class OT4P4AS:
 
             # Update model base
             model.update_base(weightP)
-            
+
             # Update progress bar
             pbar.set_description(f"Loss: {loss_val.item():.6f}, Tau: {current_tau:.4f}")
-            
+
             if loss_val < 1e-6:
-                print(f"Converged to target threshold at iteration {i+1}")
+                print(f"Converged to target threshold at iteration {i + 1}")
                 break
 
         end_time = time()

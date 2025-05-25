@@ -1,5 +1,6 @@
 import numpy as np
 from typing import Optional, Union
+from .projection import sinkhorn
 
 
 def check_random_state(
@@ -22,53 +23,6 @@ def check_random_state(
     )
 
 
-def sinkhorn(
-    X: np.ndarray, max_iter: Union[int, None] = None, tol: float = 1e-9
-) -> np.ndarray:
-    """
-    Apply Sinkhorn operator to make a matrix doubly stochastic.
-
-    Parameters
-    ----------
-    X : np.ndarray
-        Non-negative square matrix to normalize
-    max_iter : int
-        Maximum number of iterations
-    tol : float
-        Convergence tolerance
-
-    Returns
-    -------
-    P : np.ndarray
-        Doubly stochastic matrix
-    """
-    
-    n = X.shape[0]
-    P = X.copy()
-
-    max_iter = max_iter or 100 + 2 * n
-
-    for _ in range(max_iter):
-        # Row normalization
-        row_sums = P.sum(axis=1, keepdims=True)
-        row_sums[row_sums == 0] = 1  # Avoid division by zero
-        P = P / row_sums
-
-        # Column normalization
-        col_sums = P.sum(axis=0, keepdims=True)
-        col_sums[col_sums == 0] = 1  # Avoid division by zero
-        P = P / col_sums
-
-        # Check convergence
-        if (
-            np.abs(P.sum(axis=1) - 1).max() < tol
-            and np.abs(P.sum(axis=0) - 1).max() < tol
-        ):
-            break
-
-    return P
-
-
 def init_barycenter(n: int) -> np.ndarray:
     """Initialize with the barycenter (uniform doubly stochastic matrix)."""
     return np.ones((n, n)) / n
@@ -87,7 +41,7 @@ def init_random_permutation(
 def init_random_doubly_stochastic(
     n: int,
     rng: Union[np.random.RandomState, np.random.Generator],
-    sinkhorn_iters: Union[int, None] = None,
+    sinkhorn_iters: Optional[int] = None,
 ) -> np.ndarray:
     """Initialize with a random doubly stochastic matrix using Sinkhorn normalization."""
     X = rng.uniform(size=(n, n))
