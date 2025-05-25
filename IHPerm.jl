@@ -4,177 +4,30 @@
 using Markdown
 using InteractiveUtils
 
-# ╔═╡ e388a8a4-fa78-11ef-2081-313d76addb66
+# ╔═╡ a53ef4d8-01e7-11f0-3fb3-f38919f92b8b
 begin
 	using LinearAlgebra
 	using SparseArrays
 	using LazyArrays
 
+	using Pluto
+	using PlutoUI
 	using Plots
 	#theme(:ggplot2)  # Use the ggplot2 theme
 
-	using Zygote
+	using CSV
+	using DataFrames
+	using Logging
 
 	using Random
 end
 
-# ╔═╡ 89ae2a51-4ae6-4eb5-afa6-c6ab047f8297
+# ╔═╡ d71aca70-35c9-4aed-80fd-1787d9525abe
 begin
-	using LogExpFunctions
-	
-	"""
-	    sinkhorn_knopp(A::Matrix{T}; max_iter=1000, tol=1e-8) where T <: Real
-	
-	Apply the Sinkhorn-Knopp algorithm to generate a doubly-stochastic matrix from a positive matrix A.
-	Uses the log-sum-exp trick for numerical stability.
-	"""
-	function sinkhorn_knopp(A::Matrix{T}; max_iter=1000, tol=1e-8) where T <: Real
-	    # Check if A is positive
-	    if any(A .<= 0)
-	        error("Input matrix must be positive (all elements > 0)")
-	    end
-	    
-	    n, m = size(A)
-	    
-	    # Initialize scaling vectors
-	    u = zeros(T, n)
-	    v = zeros(T, m)
-	    
-	    # Store log of matrix A for numerical stability
-	    log_A = log.(A)
-	    
-	    # Iterative process
-	    for iter = 1:max_iter
-	        # Update u: ensure rows sum to 1
-	        u = [-logsumexp(log_A[i, :] .+ v) for i in 1:n]
-	        
-	        # Update v: ensure columns sum to 1
-	        v = [-logsumexp(log_A[:, j] .+ u) for j in 1:m]
-	        
-	        # Check for convergence
-	        if iter % 10 == 0
-	            # Compute current approximation with proper broadcasting
-	            P = exp.(log_A .+ reshape(u, :, 1) .+ reshape(v, 1, :))
-	            
-	            # Check row and column sums
-	            row_err = maximum(abs.(sum(P, dims=2) .- 1))
-	            col_err = maximum(abs.(sum(P, dims=1) .- 1))
-	            
-	            if max(row_err, col_err) < tol
-	                return P
-	            end
-	        end
-	    end
-	    
-	    # Return final approximation
-	    return exp.(log_A .+ reshape(u, :, 1) .+ reshape(v, 1, :))
-	end
+	using Optimization, OptimizationMOI, Ipopt
 end
 
-# ╔═╡ e9702fca-1a93-4ca8-9c8a-51374cf9cf88
-begin
-	using Optimization, OptimizationMOI, Ipopt, OptimizationOptimJL
-	using ForwardDiff
-end
-
-# ╔═╡ 0be4b97f-f650-4252-92a9-babfa56891b4
-begin
-	using ADTypes  # Add this import
-	
-	"""
-	   solve_with_custom_gradients(
-	       A::Matrix{T};
-	       c::Vector{T}=zeros(eltype(A), size(A, 1)),
-	       max_iter::Integer=1000,
-	       tol::Real=1e-8
-	   ) where T<:Real
-	
-	Solve the Approximate Symmetry Problem using custom gradient calculations.
-	"""
-	function solve_with_custom_gradients(A::AbstractMatrix{T};
-	   c::AbstractVector{T}=zeros(T, size(A, 1)),
-	   max_iter::Integer=1000,
-	   tol::Real=1e-8
-	) where T<:Real
-	   n = size(A, 1)
-	   x0 = Vector{Float64}(shuffle(1:n))
-	   
-	   obj_func = PermutationVectorIHPenalized(A, c)
-	   
-	   # Pre-allocate arrays for calculations
-	   function cons!(res, x, p)
-	       @inbounds for j in 1:n
-	           res[j] = sum(obj_func.b(x[i] - j) for i in 1:n) - one(T)
-	       end
-	       return nothing
-	   end
-	   
-	   function cons_j!(J, x, p)
-	       @inbounds for j in 1:n, i in 1:n
-	           J[j, i] = obj_func.db(x[i] - j)
-	       end
-	       return nothing
-	   end
-	   
-	   function cons_h!(H, x, p)
-	       @inbounds for j in 1:n, i in 1:n
-	           H[j][i, i] = obj_func.d2b(x[i] - j)
-	       end
-	       return nothing
-	   end
-	   
-	   function grad!(G, x, p)
-	       jacobian!(G, obj_func, x)
-	       return nothing
-	   end
-	   
-	   function hess!(H, x, p)
-	       hessian!(H, obj_func, x)
-	       return nothing
-	   end
-	   
-	   optf = OptimizationFunction(
-	       (u, p) -> obj_func(u);
-	       grad=grad!,
-	       hess=hess!,
-	       cons=cons!,
-	       cons_j=cons_j!,
-	       cons_h=cons_h!
-	   )
-	   
-	   # Lower and upper bounds
-	   lb = zeros(T, n)
-	   ub = fill(T(n + 1), n)
-	   
-	   # Create the optimization problem
-	   prob = OptimizationProblem(
-	       optf,
-	       x0,
-	       nothing;
-	       lb=lb, 
-	       ub=ub,
-	       lcons=zeros(T, n), 
-	       ucons=zeros(T, n)
-	   )
-	   
-	   # Set up IPOPT solver options
-	   optimizer = OptimizationMOI.MOI.OptimizerWithAttributes(
-	       Ipopt.Optimizer,
-	       "tol" => Float64(tol),
-	       "max_iter" => max_iter,
-	       "hessian_approximation" => "limited-memory",
-	       "print_level" => 3,
-	       "max_cpu_time" => 3600.0  # 1 hour
-	   )
-	   
-	   # Solve the problem
-	   sol = solve(prob, optimizer)
-	   
-	   return sol
-	end
-end
-
-# ╔═╡ 9f972bc2-4405-4abd-af23-2669855c1e2b
+# ╔═╡ 89f0015f-fb69-4dac-8a31-501ff494635f
 begin
 	using NPZ
 	
@@ -234,846 +87,7 @@ begin
 	end
 end
 
-# ╔═╡ 46dd04c1-3c53-4d24-a061-39e9fc7bb713
-begin
-	n = 4
-
-	A = Matrix{Float64}([
-		0  1  0  1
-		1  1  0  1
-		0  0  1  0
-		1  1  0  0
-	])
-	p = [1.4, 2.8, 1.7, 3.9]
-end
-
-# ╔═╡ 4e7810e7-a1f7-4500-9f7d-9f5aea6ae69e
-md"""
-# Relaxed Definitions Permutations
-"""
-
-# ╔═╡ b0be28d0-c53d-4f74-9b3a-951d05d1a016
-md"""
-
-We want to represent a constraint
-
-```math
-\pi \in S_n
-```
-
-Using integer programming we could formulate this constraint as
-
-```math
-\begin{gather}
-(\forall i \neq j)\; \pi_i \neq \pi_j \\
-\pi \in \{1, 2, \ldots, n\}^n
-\end{gather}
-```
-
-**TODO**
-...
-
-Relaxed formulation:
-```math
-\begin{gather}
-	\sum_i \pi_i = \binom{n}{2} \\
-	0 \le \pi \le n \\
-	\pi \in \mathbb{R}^n
-\end{gather}
-```
-"""
-
-# ╔═╡ f53cd2d2-b08e-4017-8c14-05bb949ddee2
-md"""
-Suppose $\pi \in \mathbb{R}^n$ is a permutation. How to reconstruct the permutation matrix?
-
-One approach would be to create a function
-```math
-f_i(x) = 
-\begin{cases}
-1 & x = n \\
-0 & \text{otherwise}
-\end{cases}
-```
-
-The permutation matrix could then be constructed as
-```math
-P 
-= ( f_j(\pi_i) )_{ij}
-=
-\begin{pmatrix}
-f_1(\pi_1) & f_2(\pi_1) & \cdots & f_n(\pi_1) \\
-f_1(\pi_2) & f_2(\pi_2) & \cdots & f_n(\pi_2) \\
-\vdots & \ddots && \vdots \\
-f_1(\pi_n) & f_2(\pi_n) & \cdots & f_n(\pi_n) \\
-\end{pmatrix}
-=
-\begin{pmatrix}
-| & | &  & | \\
-f_1(\pi) & f_2(\pi) & \cdots & f_n(\pi) \\
-| & | &  & | \\
-\end{pmatrix}
-```
-"""
-
-# ╔═╡ f7b38a1d-da6f-41c0-bff3-48ec8aa2940c
-let
-	f(x) = (x == 0) ? 1 : 0
-
-	p = plot(layout=(n, 1), xlims=[0, n + 1], ylims = [0, 1.5])
-
-	for i in 1:n
-		plot!(p[i], x -> f(x - i), label="f_$i")
-		scatter!(p[i], [i], [1], markersize=2,color=:blue, label=nothing)
-	end
-	p
-end
-
-# ╔═╡ dfe3e0c7-c65e-47c9-8362-37e0ce3d555d
-let
-	f(x) = (x == 0) ? 1 : 0
-	π = [3, 1, 4, 2]
-	[f(π[i] - j) for i = 1:n, j = 1:n ]
-end
-
-# ╔═╡ e9399db5-cd3e-4d15-9b39-e81c121c475d
-md"""
-However, using this function fails, if we consider a "relaxed" permutation $\tilde{\pi} \in \mathbb{R}^n$, since we would obtain a zero matrix in most cases as it is unlikely that the elements will be integers.
-"""
-
-# ╔═╡ b5e6dc4c-58b5-4f93-88fd-5faf47eac6dc
-let
-	f(x) = (x == 0) ? 1 : 0
-	[f(p[i] - j) for i = 1:n, j = 1:n ]
-end
-
-# ╔═╡ dfe481fd-f10e-4458-bfcb-d6b32f025f79
-md"""
-What we can do instead. Is that we consider the element $\tilde{\pi}_i$ is some weighted combination of possible integral values around it.
-
-For example, suppose $\tilde{\pi}_i = 1.4$. We can think about it that this value represents the idea that the real value is either 1 or 2, but more likely (or skewed) to be 1 than 2.
-
-We could express this idea as a convex combination $1.4 = 0.6 \cdot 1 + 0.4 \cdot 2$
-
-We can model this by using the functions
-
-```math
-{\displaystyle f_i(x)= f(x - i)}
-```
-where
-```math
-f(x)=
-\begin{cases}
-x + 1 & -1 \leq x \leq 0 \\
-1 - x & 0 \leq x \leq 1 \\
-0 & \text{otherwise}
-\end{cases}
-```
-"""
-
-# ╔═╡ 0ab716c2-0c36-44ec-8aa7-60b275a936b8
-let
-	function f(x)
-	    if -1 <= x <= 0
-	        return x + 1
-		elseif 0 <= x <= 1
-			return 1 - x
-	    else
-	        0
-	    end
-	end 
-
-	p = plot(layout=(n, 1), xlims=[0, n + 1], ylims = [0, 1.5])
-
-	for i in 1:n
-		plot!(p[i], x -> f(x - i), label="f_$i")
-		vline!(p[i], [1, n], label=nothing, color=:black)
-	end
-	p
-end
-
-# ╔═╡ 33557962-738e-4b59-b671-bef07aa3f6e0
-md"""
-However, this function is not differentiable at all points. This is not good since we would like to use gradient based optimization methods.
-
-Notice, that the function $f_i$ can be thought of as a shifted version of the *triangular distribution*. This distribution can be generalized into so called [*Irwin-Hall distribution*](https://www.wikiwand.com/en/articles/Irwin%E2%80%93Hall_distribution).
-
-If we take the shifted version of the Irwin-Hall distribution for k=3, we obtain a "smoothed" version of the triangular distribution.
-
-```math
-{\displaystyle f(x)={\begin{cases}{\frac {1}{2}}x^{2}&0\leq x\leq 1\\{\frac {1}{2}}(-2x^{2}+6x-3)&1\leq x\leq 2\\{\frac {1}{2}}(3-x)^{2}&2\leq x\leq 3 \\
-0 & \text{otherwise}
-\end{cases}}}
-```
-
-This function is a spline and is continously differentiable.
-"""
-
-# ╔═╡ 6d482735-8577-4d36-b549-7a65244198a2
-
-"""
-    irwin_hall_3(x::T) where T<:Real
-"""
-function irwin_hall_3(x::T) where T<:Real
-    if x < zero(T)
-        return zero(T)
-    elseif x < one(T)
-        return convert(T, 0.5) * x^2
-    elseif x < convert(T, 2)
-        return convert(T, 0.5) * (-2*x^2 + 6*x - 3)
-    elseif x <= convert(T, 3)
-        return convert(T, 0.5) * (3-x)^2
-    else
-        return zero(T)
-    end
-end
-
-# ╔═╡ 612b73c0-d30a-4f13-843f-977ddf80c244
-"""
-    irwin_hall_3_derivative(x::T) where T<:Real
-
-First derivative of the `irwin_hall_3` function.
-"""
-function irwin_hall_3_derivative(x::T) where T<:Real
-    if x < zero(T)
-        return zero(T)
-    elseif x < one(T)
-        return x
-    elseif x < convert(T, 2)
-        return -2*x + 3
-    elseif x <= convert(T, 3)
-        return x - 3
-    else
-        return zero(T)
-    end
-end
-
-# ╔═╡ 01a35b96-74cf-4b2c-8835-e62e5bc102bb
-"""
-    irwin_hall_3_hessian(x::T) where T<:Real
-
-Second derivative of the `irwin_hall_3` function.
-"""
-function irwin_hall_3_hessian(x::T) where T<:Real
-    if x < zero(T)
-        return zero(T)
-    elseif x < one(T)
-        return one(T)
-    elseif x < convert(T, 2)
-        return -2 * one(T)
-    elseif x <= convert(T, 3)
-        return one(T)
-    else
-        return zero(T)
-    end
-end
-
-# ╔═╡ cc487ee9-601e-4991-961e-fb5cc347182b
-let
-	function f(x)
-	    if -1.5 ≤ x ≤ -0.5
-	        return 0.5*x^2 + 1.5*x + 1.125
-	    elseif -0.5 ≤ x ≤ 0.5
-	        return -1.0*x^2 + 0.75
-	    elseif 0.5 ≤ x ≤ 1.5
-	        return 0.5*x^2 - 1.5*x + 1.125
-	    else
-	        return 0
-	    end
-	end
-
-	p = plot(layout=(n, 1), xlims=[0, n + 1], ylims = [0, 1.5])
-
-	for i in 1:n
-		plot!(p[i], x -> f(x - i), label="f_$i")
-		vline!(p[i], [1, n], label=nothing, color=:black)
-	end
-	p
-end
-
-# ╔═╡ 24df4924-bf5c-4ffe-8b27-19f0f67115fa
-md"""
-However, there is clipping of the function at the edges, so additionally, we make it periodic.
-"""
-
-# ╔═╡ 435ce43a-d531-48e1-a465-dd8a0844a2cf
-"""
-    periodic(f::Function, period::Integer)
-
-Create a periodic version of function f with given period.
-"""
-function periodic(f::Function, period::Integer)
-	# Enough for our use case to repeat 3 times
-    return x -> f(x + period) + f(x) + f(x - period)
-end
-
-# ╔═╡ 73bb6329-063d-47f0-bcbc-8c0d1f8a1631
-begin
-	# Create the periodic functions
-	f = periodic(x -> irwin_hall_3(x + 3/2), n)
-	df = periodic(x -> irwin_hall_3_derivative(x + 3/2), n)
-	d2f = periodic(x -> irwin_hall_3_hessian(x + 3/2), n)
-end
-
-# ╔═╡ 0592a253-a759-4ea6-ae1b-1aba8a0725ce
-let
-	p = plot(layout=(n, 1), xlims=[0, n + 1], ylims = [0, 1.5])
-
-	for i in 1:n
-		plot!(p[i], x -> f(x - i), label="f_$i")
-		vline!(p[i], [1, n], label=nothing, color=:black)
-	end
-	p
-end
-
-# ╔═╡ a1d7ece9-0e6d-40be-82f9-a06a2cecbd0b
-let
-	p = plot(xaxis = [-4, 4], title="f, f', f''")
-	plot!(p, f, label="f")
-	plot!(p, df, label="f'")
-	plot!(p, d2f, label="f''")
-	p
-end
-
-# ╔═╡ 0fdbe7aa-6006-4543-a273-3fb2027df420
-md"""
-# Approximate Symmetry
-"""
-
-# ╔═╡ 6381946b-49fd-4541-aaab-5e58915aa984
-md"""
-We are solving the problem
-
-**Approximate Symmetry Problem (ASP)**
-
-*Input:* A graph $G$ having adjacency matrix $A$ and a (vector) constant $c \in \mathbb{R}^3$.
-    
-```math
-\begin{equation*}
-	\min_{P \in \mathcal{P}_n} -\mathrm{tr}(A P A^T P^T - \mathrm{diag}(c) P)
-\end{equation*}
-```
-"""
-
-# ╔═╡ bdc2bde2-917f-4ec2-9043-8b40d68377ac
-"""
-    P(π::Vector{T}) where T<:Real
-
-Construct an approximate permutation matrix from vector `π` using the basis function `f`.
-Each element `π[i]` represents the approximate position in the permutation.
-
-# Arguments
-- `π::Vector{T}`: Vector representing an approximate permutation
-
-# Returns
-- A matrix `P` where `P[i,j] = f(π[i] - j)`
-"""
-function P(π::Vector{T}) where T<:Real
-	n = size(π, 1)
-	[ f(π[i] - j) for i in 1:n, j in 1:n ]
-end
-
-# ╔═╡ f8a80a32-7d76-4cbb-b317-275efceba2f5
-"""
-    P!(P_result::Matrix{T}, π::Vector{T}) where T<:Real
-
-Construct an approximate permutation matrix from vector `π` and store the result in `P_result`.
-
-# Arguments
-- `P_result::Matrix{T}`: Pre-allocated matrix to store the result
-- `π::Vector{T}`: Vector representing an approximate permutation
-
-# Returns
-- The matrix `P_result` where `P_result[i,j] = f(π[i] - j)`
-"""
-function P!(P_result::Matrix{T}, π::Vector{T}) where T<:Real
-    n = length(π)
-    for i in 1:n, j in 1:n
-        @inbounds P_result[i,j] = f(π[i] - j)
-    end
-    return P_result
-end
-
-# ╔═╡ 33783c65-92f4-428a-a619-5f2c701c0e23
-"""
-    F(A::Matrix{T}, P::Matrix{T}, c::Vector{T}=zeros(T,size(A,1))) where T<:Real
-
-Calculate the objective function `F(A,P,c) = -tr(A * P * A' * P') + diag(c) * P`
-This measures the approximate symmetry of a graph with adjacency matrix `A`
-under the permutation `P`, with optional penalty `c`.
-
-# Arguments
-- `A::Matrix{T}`: Adjacency matrix (symmetric)
-- `P::Matrix{T}`: Permutation matrix
-- `c::Vector{T}=zeros(T,size(A,1))`: Optional vector of penalty coefficients, defaults to zeros
-
-# Returns
-- The objective function value
-"""
-function F(
-	A::Matrix{T},
-	P::Matrix{T};
-	c::Vector{T}=zeros(T,size(A,1))
-) where T<:Real
-    return -tr(A * P * A' * P') + tr(diagm(c) * P)
-end
-
-# ╔═╡ a2a5a2da-5a06-4d03-899b-2d50676ecad5
-"""
-    G(A::Matrix{T}, π::Vector{T}, c::Vector{T}=zeros(T,size(A,1))) where T<:Real
-
-Calculate the objective function `G(A,π,c) = F(A,P(π),c)`.
-
-# Arguments
-- `A::Matrix{T}`: Input matrix
-- `π::Vector{T}`: Vector representing an approximate permutation
-- `c::Vector{T}=zeros(T,size(A,1))`: Optional vector of penalty coefficients, defaults to zeros
-
-# Returns
-- The objective function value
-"""
-function G(
-	A::Matrix{T},
-	π::Vector{T};
-	c::Vector{T}=zeros(T,size(A,1))
-) where T<:Real
-    P_matrix = P(π)
-    return F(A, P_matrix, c=c)
-end
-
-# ╔═╡ 25856686-763d-484a-8fc6-3575984e2b84
-# Define a struct to encapsulate all the buffers needed for calculations
-"""
-    OptimizationBuffers{T<:Real}
-
-A structure holding pre-allocated buffers for optimization-related calculations.
-
-# Fields
-- `P_result::Matrix{T}`: Buffer for the permutation matrix
-- `grad::Vector{T}`: Buffer for the gradient vector
-- `D::Matrix{T}`: Buffer for the gradient matrix
-- `buffer::Matrix{T}`: General-purpose buffer matrix
-"""
-struct OptimizationBuffers{T<:Real}
-    P_result::Matrix{T}   # Permutation matrix
-    grad::Vector{T}       # Gradient vector
-    D::Matrix{T}          # Gradient matrix
-    buffer::Matrix{T}     # General buffer for matrix multiplications
-    
-    """
-        OptimizationBuffers{T}(n::Integer) where T<:Real
-
-    Construct an OptimizationBuffers object with pre-allocated matrices of size n × n.
-    
-    # Arguments
-    - `n::Integer`: Dimension of the matrices
-    
-    # Returns
-    - A new OptimizationBuffers object
-    """
-    function OptimizationBuffers{T}(n::Integer) where T<:Real
-        return new{T}(
-            Matrix{T}(undef, n, n),   # P_result
-            Vector{T}(undef, n),      # grad
-            Matrix{T}(undef, n, n),   # D
-            Matrix{T}(undef, n, n)    # buffer
-        )
-    end
-end
-
-
-# ╔═╡ e5853062-bf57-43c7-b242-1f21fddf4000
-
-"""
-    G!(A::Matrix{T}, π::Vector{T}, buffers::OptimizationBuffers{T}, c::Vector{T}=buffers.c_zeros) where T<:Real
-
-Calculate the objective function G(A,π,c) using pre-allocated buffers for improved performance.
-
-# Arguments
-- `A::Matrix{T}`: Input matrix
-- `π::Vector{T}`: Vector representing an approximate permutation
-- `buffers::OptimizationBuffers{T}`: Pre-allocated buffers
-- `c::Vector{T}=buffers.c_zeros`: Optional vector of penalty coefficients, defaults to zeros
-
-# Returns
-- The objective function value
-"""
-function G!(
-	A::Matrix{T},
-	π::Vector{T},
-	buffers::OptimizationBuffers{T};
-    c::Vector{T}=zeros(T,size(π,1))
-) where T<:Real
-    P!(buffers.P_result, π)
-    return F(A, buffers.P_result, c=c)
-end
-
-# ╔═╡ 19745ff7-e06a-4add-9e2c-05945d2920e3
-md"""
-# Derivatives
-
-Throughout, we are using [Numerator Layout](https://www.wikiwand.com/en/articles/Matrix_calculus#Numerator-layout_notation) and [Einstein notation](https://www.wikiwand.com/en/articles/Einstein_notation) (loosely)
-"""
-
-# ╔═╡ 0a9f5275-0edb-408c-b082-2e41102b6341
-md"""
-## Gradient
-"""
-
-# ╔═╡ 78a81278-1f3f-4649-aea0-154bd5430eba
-md"""
-We split the computation of the gradient of F w.r.t. to P
-```math
-G(A, π) 
-= F(A, P(π))
-= -\mathrm{tr}(A P A^T P^T) + \mathrm{diag}(c) P
-```
-
-By using chain rule we get
-```math
-\frac{∂G}{∂π} = \frac{\partial F}{\partial P_{ij}} \frac{\partial P_{ij}}{\partial \pi}
-```
-
-"""
-
-# ╔═╡ 59a8e39e-0c9f-4d0c-97c0-8143874cd803
-md"""
-
-Let's comute first $\frac{\partial P}{\partial \pi}$:
-```math
-\frac{\partial P_{ij}}{\partial \pi_k} 
-= \frac{\partial}{\partial \pi_k}f_j(\pi_i)
-= \frac{\partial}{\partial \pi_k}f(\pi_i - j)
-= \begin{cases}
-f'(\pi_i - j) & k = i \\
-0 & \text{otherwise}
-\end{cases}
-```
-
-"""
-
-# ╔═╡ ccc17689-d95c-419a-b251-ef4bc5a84e4b
-md"""
-For $\frac{\partial F}{\partial P}$ we have the known derivative
-```math
-\frac{\partial F}{\partial P} 
-= −A P A^T − A^T P A + c e^T
-= −2 A P A + c e^T
-```
-where $e$ is a vector of ones.
-""" 
-
-# ╔═╡ 62a00bef-7011-492c-8437-60b6c402d0b5
-"""
-    dPdπ(π::Vector{T}) where T<:Real
-
-Calculate the Jacobian of P with respect to π.
-
-(FOR TESTING)
-"""
-function dPdπ(π::Vector{T}) where T<:Real
-	n = size(π, 1)
-	result = Matrix{T}(undef, n, n, n)
-    
-     for i in 1:n
-        for j in 1:n
-            for k in 1:n
-				result[i, j, k] = (i == k) ? df(π[k] - j) : zero(T)
-            end
-        end
-    end
-    
-    return sparse(rows, cols, vals, n*n, n)
-end
-
-# ╔═╡ f731520a-7e50-4949-a67c-d7094dacaa2f
-"""
-    dvecPdπ(π::Vector{T}) where T<:Real
-
-Calculate the Jacobian of vec(P) with respect to π.
-Returns a sparse matrix for memory efficiency.
-
-# Arguments
-- `π::Vector{T}`: Vector representing an approximate permutation
-
-# Returns
-- Sparse matrix representing the Jacobian
-"""
-function dvecPdπ(π::Vector{T}) where T<:Real
-    n = length(π)
-    
-    rows = Int[]
-    cols = Int[]
-    vals = T[]
-
-    for i in 1:n
-        for j in 1:n
-            push!(rows, (j-1)*n + i)
-            push!(cols, i)
-            push!(vals, df(π[i] - j))
-        end
-    end
-    
-    return sparse(rows, cols, vals, n*n, n)
-end
-
-# ╔═╡ 293b0b45-1e62-492b-be49-2fa77e847a81
-
-"""
-    dFdP(A::Matrix{T}, P::Matrix{T}, c::Vector{T}=zeros(T,size(A,1))) where T<:Real
-
-Calculate the gradient of the objective function with respect to P.
-Returns `∂F/∂P = -2 * A * P * A + c * e'`
-
-# Arguments
-- `A::Matrix{T}`: Input matrix
-- `P::Matrix{T}`: Permutation matrix
-- `c::Vector{T}=zeros(T,size(A,1))`: Optional vector of penalty coefficients, defaults to zeros
-
-# Returns
-- Matrix representing the gradient
-"""
-function dFdP(
-	A::Matrix{T},
-	P::Matrix{T};
-	c::Vector{T}=zeros(T,size(A,1))
-) where T<:Real
-    base_gradient = -2 * A * P * A
-    
-	n = size(c, 1)
-	return base_gradient + c * ones(T, n)'
-end
-
-# ╔═╡ 252d6270-7e58-47f3-acef-f340e74e187f
-"""
-    dFdP!(D::Matrix{T}, A::Matrix{T}, P::Matrix{T}, buffer::Matrix{T}, 
-          c::Vector{T}=zeros(T,size(A,1))) where T<:Real
-
-Calculate the gradient of the objective function with respect to `P` using pre-allocated buffers.
-Stores the result in D.
-
-# Arguments
-- `D::Matrix{T}`: Pre-allocated matrix to store the result
-- `A::Matrix{T}`: Input matrix
-- `P::Matrix{T}`: Permutation matrix
-- `buffer::Matrix{T}`: Pre-allocated buffer matrix
-- `c::Vector{T}=zeros(T,size(A,1))`: Optional vector of linear coefficients, defaults to zeros
-
-# Returns
-- The matrix D containing the gradient
-"""
-function dFdP!(
-	D::Matrix{T}, 
-	A::Matrix{T},
-	P::Matrix{T},
-	buffer::Matrix{T};
-    c::Vector{T}=zeros(T,size(A,1))
-) where T<:Real
-    mul!(buffer, A, P)
-    mul!(D, buffer, A)
-    rmul!(D, -2)
-	
-	for k in eachindex(D[:, 1])
-		D[:, k] += c
-	end
-    
-    return D
-end
-
-# ╔═╡ 89f46bbd-d9df-4a79-9194-669bdcf3e358
-"""
-    dGdp(A::Matrix{T}, π::Vector{T}, c::Vector{T}=zeros(T,size(A,1))) where T<:Real
-
-Calculate the gradient of the objective function with respect to π.
-Uses chain rule: `∇G(π) = vec(∂G/∂P)' * ∂vec(P)/∂π`
-
-# Arguments
-- `A::Matrix{T}`: Input matrix
-- `π::Vector{T}`: Vector representing an approximate permutation
-- `c::Vector{T}=zeros(T,size(A,1))`: Optional vector of penalty coefficients, defaults to zeros
-
-# Returns
-- Vector representing the gradient with respect to π
-"""
-function dFdp(
-	A::Matrix{T},
-	π::Vector{T};
-	c::Vector{T}=zeros(T,size(A,1))
-) where T<:Real
-	
-    P_matrix = P(π)
-    grad_P = dFdP(A, P_matrix, c=c)
-    jacob = dvecPdπ(π)
-
-    return vec(grad_P)' * jacob
-end
-
-# ╔═╡ e9751b4b-e60d-4764-adee-7e5b7d69b82e
-
-"""
-    dGdp!(grad::Vector{T}, A::Matrix{T}, π::Vector{T}, buffers::OptimizationBuffers{T}, 
-          c::Vector{T}=buffers.c_zeros) where T<:Real
-
-Calculate the gradient of the objective function with respect to π using pre-allocated buffers.
-Stores the result in grad.
-
-# Arguments
-- `grad::Vector{T}`: Pre-allocated vector to store the result
-- `A::Matrix{T}`: Input matrix
-- `π::Vector{T}`: Vector representing an approximate permutation
-- `buffers::OptimizationBuffers{T}`: Pre-allocated buffers
-- `c::Vector{T}=buffers.c_zeros`: Optional vector of linear coefficients, defaults to zeros
-
-# Returns
-- The vector grad containing the gradient
-"""
-function dGdp!(
-	grad::Vector{T},
-	A::Matrix{T},
-	π::Vector{T},
-	buffers::OptimizationBuffers{T}; 
-    c::Vector{T}=zeros(T,size(π,1))
-	) where T<:Real
-    
-	n = length(π)
-    
-    P!(buffers.P_result, π)
-    dFdP!(buffers.D, A, buffers.P_result, buffers.buffer, c=c)
-    
-    fill!(grad, zero(T))
-    
-    # Manually compute the product using the sparsity pattern of the Jacobian
-    for k in eachindex(grad)
-        for j in 1:n
-            grad[k] += buffers.D[k, j] * df(π[k] - j)
-        end
-    end
-    
-    return grad
-end
-
-# ╔═╡ b02ec8d6-4aaa-42f3-b04f-46ff6ca338bb
-md"""
-# Hessian
-"""
-
-# ╔═╡ 90ff1dc8-6211-4809-ae0c-6d5c51aeae64
-md"""
-We get hessian by derivating the gradient
-
-By using the product rule and chain rule we get
-```math
-\begin{align}
-\frac{\partial^2 F}{\partial \pi_i \partial \pi_j} 
-&= \frac{\partial}{\partial \pi_j} (\frac{\partial F}{\partial \pi_i} ) \\
-&= \frac{\partial}{\partial \pi_j} (\frac{\partial G}{\partial P_{kl}} \frac{\partial P_{kl}}{\partial \pi_i} ) \\
-&= \frac{\partial^2 G}{\partial \pi_j \partial P_{kl}} \frac{\partial P_{kl}}{\partial \pi_i} + \frac{\partial G}{\partial P_{kl}} \frac{\partial P_{kl}}{\partial \pi_i \partial \pi_j} \\
-&= \underbrace{\frac{\partial^2 G}{\partial P_{mn} \partial P_{kl}} \frac{\partial P_{kl}}{\partial \pi_i} \frac{\partial P_{mn}}{\partial \pi_j}}_{\mathrm{term1}}
-+ 
-\underbrace{\frac{\partial G}{\partial P_{kl}} \frac{\partial P_{kl}}{\partial \pi_i \partial \pi_j}}_{\mathrm{term2}}
-\end{align}
-```
-"""
-
-# ╔═╡ 59a251e0-8844-41bb-a794-d052b5764f73
-begin
-	"""
-	    H_elem(π::Vector{T}, k::Integer, l::Integer) where T<:Real
-	
-	Calculate an element of the Hessian of P with respect to π.
-	Uses sparsity pattern for efficiency.
-	
-	# Arguments
-	- `π::Vector{T}`: Vector representing an approximate permutation
-	- `k::Integer`: Row index
-	- `l::Integer`: Column index
-	
-	# Returns
-	- Sparse matrix representing the element of the Hessian
-	"""
-	function H_elem(π::Vector{T}, k::Integer, l::Integer) where T<:Real
-	    n = length(π)
-	    
-	    rows = Int[]
-	    cols = Int[]
-	    vals = T[]
-	    
-	    # Only non-zero for k == l due to sparsity pattern
-	    if k == l
-	        for j in 1:n
-	            push!(rows, k)
-	            push!(cols, j)
-	            push!(vals, d2f(π[k] - j))
-	        end
-	    end
-	        
-	    return sparse(rows, cols, vals, n, n)
-	end
-	
-	"""
-	    HGdpdp_term2(A::Matrix{T}, π::Vector{T}, c::Vector{T}=zeros(T,size(A,1))) where T<:Real
-	
-	Precompute the constant second term of the Hessian matrix.
-	This term remains constant throughout optimization when using the original irwin_hall_3 function.
-	
-	# Arguments
-	- `A::Matrix{T}`: Input matrix
-	- `π::Vector{T}`: Vector representing an approximate permutation
-	- `c::Vector{T}=zeros(T,size(A,1))`: Optional vector of linear coefficients, defaults to zeros
-	
-	# Returns
-	- Matrix representing the precomputed term
-	"""
-	function HFdpdp_term2(
-		A::Matrix{T},
-		π::Vector{T};
-		c::Vector{T}=zeros(T,size(A,1))
-	) where T<:Real
-	    n = length(π)
-	    P_matrix = P(π)
-	    grad_P = dGdP(A, P_matrix, c=c)
-	
-	    term2 = zeros(T, n, n)
-	    
-	    for k in 1:n
-	        H_ij = H_elem(π, k, k)
-	        term2[k, k] = sum(grad_P .* H_ij)
-	    end
-	    
-	    return term2
-	end
-	
-	"""
-	    HGdpdp(A::Matrix{T}, π::Vector{T}, term2::Matrix{T}) where T<:Real
-	
-	Calculate the Hessian of the objective function with respect to π.
-	Uses precomputed constant term2 for improved performance.
-	
-	# Arguments
-	- `A::Matrix{T}`: Input matrix
-	- `π::Vector{T}`: Vector representing an approximate permutation
-	- `term2::Matrix{T}`: Precomputed constant term
-	
-	# Returns
-	- Matrix representing the Hessian
-	"""
-	function HGdpdp(A::Matrix{T}, π::Vector{T}, term2::Matrix{T}) where T<:Real
-	    P_matrix = P(π)
-	    jacob = dvecPdπ(π)
-	    hess_G = -2 * LazyArrays.Kron(A, A)
-	    
-	    term1 = jacob' * hess_G * jacob
-	    
-	    return term1 + term2
-	end
-end
-
-# ╔═╡ dddb5bc8-29b8-4146-89b4-947b1a75139a
-md"""
----
-"""
-
-# ╔═╡ 33fb0b07-090b-4350-b97e-5ffca58bb5f7
+# ╔═╡ 12efc307-05d8-49db-8959-6437116307f2
 begin
 	abstract type ObjectiveFunction end
 	
@@ -1098,9 +112,9 @@ begin
 	end
 end
 
-# ╔═╡ d5a7e732-8d0a-483c-b3c0-bfbbb08398e1
+# ╔═╡ 1e025206-dbf6-4129-84b1-df39cd68f8d4
 begin
-	struct PermutationVectorIHPenalized{T<:Real} <: ObjectiveFunction
+	struct PermutationVectorIHPenalized{T<:Real, B<:Function, DB<:Function, D2B<:Function} <: ObjectiveFunction
 	    A::Matrix{T}
 	    c_mat::Diagonal{T}
 	    
@@ -1108,43 +122,71 @@ begin
 	    AP_buffer::Matrix{T}
 	    APA_buffer::Matrix{T}
 	    
-	    b::Function
-	    db::Function
-	    d2b::Function
+	    b::B
+	    db::DB
+	    d2b::D2B
 	    
 	    n::Int
-	    hessian_outer::AbstractMatrix
+	end
+	
+	# Simple constructor without defaults first
+	function PermutationVectorIHPenalized(
+	    A::AbstractMatrix,
+	    c::AbstractVector;
+	    T::Type{<:Real}=promote_type(Float64, eltype(A), eltype(c))
+	)
+	    n = size(A, 1)
+	    @assert n == size(c, 1) "Matrix A and vector c must have compatible dimensions"
 	    
-	    function PermutationVectorIHPenalized(
-	        A::AbstractMatrix{TA},
-	        c::AbstractVector{TC},
-	        ::Type{T}=promote_type(Float64, eltype(A), eltype(c))
-	    ) where {TA<:Real, TC<:Real, T<:Real}
-	        
-	        n = size(A, 1)
-	        @assert n == size(c, 1) "Matrix A and vector c must have compatible dimensions"
-	        
-	        # Convert inputs to specified type T
-	        A_mat = convert(Matrix{T}, A)
-	        c_mat = Diagonal(convert(Vector{T}, c))
-	        
-	        # Preallocate buffers
-	        P_buffer = Matrix{T}(undef, n, n)
-	        AP_buffer = Matrix{T}(undef, n, n)
-	        APA_buffer = Matrix{T}(undef, n, n)
-	        
-	        # Create function closures
-	        b = periodic(x -> irwin_hall_3(x + 3/2), n)
-	        db = periodic(x -> irwin_hall_3_derivative(x + 3/2), n)
-	        d2b = periodic(x -> irwin_hall_3_hessian(x + 3/2), n)
-	        
-	        new{T}(
-	            A_mat, c_mat,
-	            P_buffer, AP_buffer, APA_buffer,
-	            b, db, d2b,
-	            n
-	        )
-	    end
+	    # Convert inputs to specified type
+	    A_mat = convert(Matrix{T}, A)
+	    c_mat = Diagonal(convert(Vector{T}, c))
+	    
+	    # Create buffers
+	    P_buffer = Matrix{T}(undef, n, n)
+	    AP_buffer = Matrix{T}(undef, n, n)
+	    APA_buffer = Matrix{T}(undef, n, n)
+	    
+	    # Create default functions
+	    b_func = periodic(x -> irwin_hall_3(x + 3/2), n)
+	    db_func = periodic(x -> irwin_hall_3_derivative(x + 3/2), n)
+	    d2b_func = periodic(x -> irwin_hall_3_hessian(x + 3/2), n)
+	    
+	    return PermutationVectorIHPenalized{T, typeof(b_func), typeof(db_func), typeof(d2b_func)}(
+	        A_mat, c_mat,
+	        P_buffer, AP_buffer, APA_buffer,
+	        b_func, db_func, d2b_func,
+	        n
+	    )
+	end
+	
+	# Constructor with custom functions
+	function PermutationVectorIHPenalized(
+	    A::AbstractMatrix,
+	    c::AbstractVector,
+	    b::Function,
+	    db::Function,
+	    d2b::Function;
+	    T::Type{<:Real}=promote_type(Float64, eltype(A), eltype(c))
+	)
+	    n = size(A, 1)
+	    @assert n == size(c, 1) "Matrix A and vector c must have compatible dimensions"
+	    
+	    # Convert inputs to specified type
+	    A_mat = convert(Matrix{T}, A)
+	    c_mat = Diagonal(convert(Vector{T}, c))
+	    
+	    # Create buffers
+	    P_buffer = Matrix{T}(undef, n, n)
+	    AP_buffer = Matrix{T}(undef, n, n)
+	    APA_buffer = Matrix{T}(undef, n, n)
+	    
+	    return PermutationVectorIHPenalized{T, typeof(b), typeof(db), typeof(d2b)}(
+	        A_mat, c_mat,
+	        P_buffer, AP_buffer, APA_buffer,
+	        b, db, d2b,
+	        n
+	    )
 	end
 	
 	function create_perm_matrix!(
@@ -1158,7 +200,7 @@ begin
 	    return P
 	end
 	
-	function (f::PermutationVectorIHPenalized{T})(x::AbstractVector{TX}) where {T<:Real, TX<:Real}
+	function (f::PermutationVectorIHPenalized)(x::AbstractVector{TX}) where {T<:Real, TX<:Real}
 	    # Calculate permutation matrix
 	    create_perm_matrix!(f.P_buffer, f, x)
 	    
@@ -1265,249 +307,263 @@ begin
 	end
 end
 
-# ╔═╡ 1adfd059-0d85-4752-a0ad-f82cf8482391
-obj_func = PermutationVectorIHPenalized(A, 0 * ones(4), Float64)
-
-# ╔═╡ 2b0a931d-5a40-44bb-a24a-8de446b91159
-hessian(obj_func, p)
-
-# ╔═╡ 2fea13ea-5b99-420a-b860-05de5646de5e
-jacobian(obj_func, p)
-
-# ╔═╡ b21e1363-eed9-4b68-9f76-30b565105fe6
+# ╔═╡ db456303-d536-440d-a21f-dd7816cd3ac6
 md"""
-# Solution
+---
 """
 
-# ╔═╡ 30dfe211-bd09-42e4-a9f1-2bcb4dffb0c9
-#=╠═╡
-sum(D, dims=1)
-  ╠═╡ =#
+# ╔═╡ a5b442f6-b412-41c0-8434-fe306e82df4e
+function solve_with_custom_gradients(
+	obj_func::PermutationVectorIHPenalized,
+   max_iter::Integer=100000,
+   tol::Real=1e-8
+)
+   n = obj_func.n
+   T = eltype(obj_func.A)
+   #x0 = Vector{Float64}(shuffle(1:n))
+	x0 = binomial(n, 2) / n * ones(n) 
+   
+   function cons!(res, x, p)
+	   @inbounds for j in 1:n
+		   res[j] = sum(obj_func.b(x[i] - j) for i in 1:n) - one(T)
+	   end
+	   return nothing
+   end
+   
+   function cons_j!(J, x, p)
+	   @inbounds for j in 1:n, i in 1:n
+		   J[j, i] = obj_func.db(x[i] - j)
+	   end
+	   return nothing
+   end
+   
+   function cons_h!(H, x, p)
+	   @inbounds for j in 1:n, i in 1:n
+		   H[j][i, i] = obj_func.d2b(x[i] - j)
+	   end
+	   return nothing
+   end
+   
+   function grad!(G, x, p)
+	   jacobian!(G, obj_func, x)
+	   return nothing
+   end
+   
+   function hess!(H, x, p)
+	   hessian!(H, obj_func, x)
+	   return nothing
+   end
+   
+   optf = OptimizationFunction(
+	   (u, p) -> obj_func(u);
+	   grad=grad!,
+	   hess=hess!,
+	   cons=cons!,
+	   cons_j=cons_j!,
+	   cons_h=cons_h!
+   )
+   
+   # Lower and upper bounds
+   lb = zeros(T, n)
+   ub = fill(T(n + 1), n)
+   
+   # Create the optimization problem
+   prob = OptimizationProblem(
+	   optf,
+	   x0,
+	   nothing;
+	   lb=lb, 
+	   ub=ub,
+	   lcons=zeros(T, n), 
+	   ucons=zeros(T, n)
+   )
+   
+   # Set up IPOPT solver options
+   optimizer = OptimizationMOI.MOI.OptimizerWithAttributes(
+	   Ipopt.Optimizer,
+	   "tol" => Float64(tol),
+	   "max_iter" => max_iter,
+	   "hessian_approximation" => "limited-memory",
+	   "print_level" => 3,
+	   "max_cpu_time" => 3600.0  # 1 hour
+   )
+   
+   # Solve the problem
+   tick = time()
+   sol = solve(prob, optimizer)
+   toc = time()
+   solution_time = toc  - tick
+	
+   return sol, x0, solution_time
+end
 
-# ╔═╡ caa472a8-5c0a-40c2-aea3-b9db1896f71b
-#=╠═╡
-sum(D, dims=2)
-  ╠═╡ =#
-
-# ╔═╡ 527799b7-7e50-4483-8b1e-c0d861b2946f
+# ╔═╡ c702fdeb-11ae-47f7-bad4-cbabfa0ac7ae
 begin
 	instance = Instance(
 		"ER",
-		"data/pidnebesna/ER/ER_nNodes20_density40.npz",
-		20
+		"data/pidnebesna/LRM_ER_rewired/LRM_ER_nNodes100_density40_rew0.npz",
+		100
 	)
 	B = load_instance_data(instance)["1"]
 
-	sol = solve_with_custom_gradients(B, c=0.1 * ones(instance.n))
+	obj_func = PermutationVectorIHPenalized(
+		B, ones(instance.n)
+	)
+
+	sol, x0, solution_time = solve_with_custom_gradients(obj_func)
 end
 
-# ╔═╡ a1dbfa99-cbb8-4454-8a56-6631fa1a2227
-sol.u
+# ╔═╡ 357ec94e-46e3-4ddb-94f2-5a65c1f7aca5
+sol.u |> P |> heatmap
 
-# ╔═╡ 5beae2d2-ff34-43ca-8bd6-dc91cb826b8e
+# ╔═╡ 95038aec-1c4f-4605-9307-197d79bee8fe
 σ = sol.u |> sortperm |> invperm
 
-# ╔═╡ 0e24cd3e-f28a-472b-bada-b34a2e43fa27
-f.(sol.u)
+# ╔═╡ 7abd8820-c603-4641-b1b9-9a5d8f1fdb81
+σ |> to_permutation_matrix |> heatmap
 
-# ╔═╡ 306aac02-1edd-427b-b9fe-a7c8eea1a0ef
-sum(P(sol.u), dims=1)
+# ╔═╡ 47b3d994-1c45-49b6-b63e-a7ff6d971a75
+P(x0) |> heatmap
 
-# ╔═╡ b6b378ce-3326-42c4-943e-355fbc52a1a4
-heatmap(P(sol.u))
+# ╔═╡ 5472b058-00b6-4747-8a59-22dd6faadca9
+P(σ)
 
-# ╔═╡ 50b72c53-41e9-4cce-93fb-3e1e85d18169
-S(B, Matrix{Float64}(to_permutation_matrix(σ)))
+# ╔═╡ 14672ce8-da5b-455f-8b8f-b6dca0251737
+solution_time
 
-# ╔═╡ 9a28e225-ee6b-4b9e-928d-d2d8f9af6ecb
-function process_dataset(input_dir, output_dir; method_name="ApproxSymmetry", method_version="v1", num_runs=5, force_recompute=false)
-    # Create output directories
-    method_dir = joinpath(output_dir, method_name)
-    version_dir = joinpath(method_dir, method_version)
-    mkpath(version_dir)
-    
-    # File to track progress for resuming
-    progress_file = joinpath(version_dir, "progress.txt")
-    
-    # Collect all instance data
-    instances = collect_instances(input_dir)
-    
-    # Group instances by graph type
-    graph_types = unique([inst.graph_type for inst in instances])
-    
-    # Process tracking variables
-    total_instances = 0
-    processed_instances = 0
-    skipped_instances = 0
-    
-    for graph_type in graph_types
-        # Get instances for this graph type
-        type_instances = filter(i -> i.graph_type == graph_type, instances)
-        total_instances += length(type_instances) * 39  # 39 simulations per instance
-        
-        # Create output directories for this model
-        model_output_dir = joinpath(version_dir, graph_type)
-        permutations_dir = joinpath(model_output_dir, "Permutations")
-        mkpath(permutations_dir)
-        
-        # Initialize timing data for this graph type
-        timing_data = Dict()
-        
-        for instance in type_instances
-            # Load the data
-            data = load_instance_data(instance)
-            
-            # Extract base filename without extension
-            base_name = replace(basename(instance.path), r"\.npz$" => "")
-            
-            println("Processing $base_name...")
-            
-            # Initialize timing data for this instance
-            timing_data[base_name] = Dict()
-            
-            # Process each simulation
-            for sim_idx in 1:39
-                # Check if this simulation has already been computed
-                if !force_recompute && is_already_computed(permutations_dir, base_name, sim_idx)
-                    println("  Skipping simulation $(sim_idx-1) (already computed)")
-                    skipped_instances += 1
-                    continue
-                end
-                
-                # Save progress to enable resuming
-                save_progress(progress_file, graph_type, base_name, sim_idx)
-                
-                # Extract the matrix for this simulation
-                matrix_key = "simulation_$(sim_idx-1)"
-                
-                if haskey(data, matrix_key)
-                    matrix = data[matrix_key]
-                else
-                    # If matrix keys are structured differently, try to adapt
-                    if haskey(data, "arr_0") && size(data["arr_0"], 1) >= sim_idx
-                        matrix = data["arr_0"][sim_idx, :, :]
-                    else
-                        println("  Warning: Could not find matrix for simulation $sim_idx in $base_name")
-                        continue
-                    end
-                end
-                
-                # Run the algorithm multiple times
-                sim_times = zeros(num_runs)
-                sim_permutations = []
-                
-                for run in 1:num_runs
-                    P, run_time = approximate_symmetry(matrix)
-                    sim_times[run] = run_time
-                    push!(sim_permutations, P)
-                end
-                
-                # Store times
-                timing_data[base_name][sim_idx] = sim_times
-                
-                # Save permutation matrices for this simulation
-                perm_file = joinpath(permutations_dir, "$(base_name)_sim$(sim_idx-1).csv")
-                
-                # Convert permutations to a format suitable for CSV
-                n = size(sim_permutations[1], 1)
-                perm_df = DataFrame()
-                
-                for run in 1:num_runs
-                    P = sim_permutations[run]
-                    # Find where each row has a 1 (the destination node)
-                    destinations = [findfirst(x -> x == 1, P[i, :]) for i in 1:n]
-                    perm_df[!, "run$run"] = destinations
-                end
-                
-                CSV.write(perm_file, perm_df)
-                processed_instances += 1
-                
-                # Print progress
-                total_done = processed_instances + skipped_instances
-                percent_done = round(total_done / total_instances * 100, digits=2)
-                println("  Completed simulation $(sim_idx-1) ($percent_done% overall)")
-            end
-        end
-        
-        # Save timing data for this model
-        time_file = joinpath(model_output_dir, "$(method_name)_time_$(graph_type).csv")
-        time_df = DataFrame()
-        
-        # Collect all base names
-        all_base_names = sort(collect(keys(timing_data)))
-        
-        # For each base name
-        for base_name in all_base_names
-            # For each simulation
-            for sim_idx in 1:39
-                if haskey(timing_data[base_name], sim_idx)
-                    # Create a row with base_name, simulation number, and times
-                    row = Dict("base_name" => base_name, "simulation" => sim_idx-1)
-                    for run in 1:num_runs
-                        row["run$run"] = timing_data[base_name][sim_idx][run]
-                    end
-                    push!(time_df, row)
-                end
-            end
-        end
-        
-        CSV.write(time_file, time_df)
-    end
-    
-    # Delete progress file since all computation is complete
-    if isfile(progress_file)
-        rm(progress_file)
-    end
-    
-    println("Processing completed:")
-    println("  $processed_instances simulations processed")
-    println("  $skipped_instances simulations skipped (already computed)")
-end
-
-# ╔═╡ d44bc887-f755-40ff-bf18-5cfd07259fe3
+# ╔═╡ 040a6d1a-0404-4e7a-9cb4-b2c661e6b186
 md"""
 ---
-
-##### Helper Functions
 """
 
-# ╔═╡ 406dc427-e8eb-46a4-b9b8-0c80a42d0870
-"""
-    E(A::AbstractMatrix{T}, P::AbstractMatrix{T}) where T<:Number
+# ╔═╡ 05468bc8-490b-4e4b-afb2-98b584f182f7
+function method_IH(A::AbstractMatrix)
+	n = size(A, 1)
+	obj_func = PermutationVectorIHPenalized(
+		A, 0.2 * ones(n)
+	)
 
-Compute the Frobenius norm-based error between a matrix A and its permutation P*A*P'.
-Uses optimized computation for different matrix types.
+	sol, _, solution_time = solve_with_custom_gradients(obj_func)
+
+	P = sol.u |> sortperm |> invperm |> to_permutation_matrix
+	P, solution_time
+end
+
+# ╔═╡ 77353104-809c-4698-92cd-21007bd09d1e
+process_dataset(
+	"data/pidnebesna",
+	"results/",
+	method_IH,
+	method_name="IH", method_version=version="barycenter",
+	num_runs=1,
+	force_recompute=false
+)
+
+# ╔═╡ 43b04676-784f-4425-b7d2-a1f3835a1759
+md"""
+---
+#### Helpert functions
 """
-function E(A::AbstractMatrix{T}, P::AbstractMatrix{T}) where T<:Number
-    # For large matrices, use BLAS operations directly
-    if isa(A, Matrix) && isa(P, Matrix) && length(A) > 1000
-        PA = similar(A)
-        mul!(PA, P, A)
-        PAP = similar(A)
-        mul!(PAP, PA, P')
-        
-        diff = A - PAP
-        return 0.25 * sum(abs2, diff)
+
+# ╔═╡ 9d2e2652-c17c-408f-9694-dac65e0fcadc
+
+"""
+    irwin_hall_3(x::T) where T<:Real
+"""
+function irwin_hall_3(x::T) where T<:Real
+    if x < zero(T)
+        return zero(T)
+    elseif x < one(T)
+        return convert(T, 0.5) * x^2
+    elseif x < convert(T, 2)
+        return convert(T, 0.5) * (-2*x^2 + 6*x - 3)
+    elseif x <= convert(T, 3)
+        return convert(T, 0.5) * (3-x)^2
     else
-        # Standard computation for other cases
-        PAP = P * A * P'
-        return 0.25 * sum(abs2, A - PAP)
+        return zero(T)
     end
 end
 
-# ╔═╡ d5ebc801-d2b7-4a85-83d2-003978eb236b
+# ╔═╡ 8e69f1ea-a8e1-4a96-867f-d9e5719d8d5a
 """
-    S(A::AbstractMatrix{T}, P::AbstractMatrix{T}, E::Union{Nothing,T}=nothing) where T<:Number
+    irwin_hall_3_derivative(x::T) where T<:Real
 
-Compute the normalized error S = 4*E/(n*(n-1)) where E is the permutation error.
-If E is not provided, it will be computed.
+First derivative of the `irwin_hall_3` function.
 """
-function S(A::AbstractMatrix{T}, P::AbstractMatrix{T}) where T<:Number
-    n = size(A, 1)
-    return 4 * E(A, P) / (n * (n - 1))
+function irwin_hall_3_derivative(x::T) where T<:Real
+    if x < zero(T)
+        return zero(T)
+    elseif x < one(T)
+        return x
+    elseif x < convert(T, 2)
+        return -2*x + 3
+    elseif x <= convert(T, 3)
+        return x - 3
+    else
+        return zero(T)
+    end
 end
 
-# ╔═╡ f5fb7b69-2c6e-48c7-8aaf-4bc296bb925e
+# ╔═╡ e60ded04-a672-4055-bf84-f84c946889b6
+"""
+    irwin_hall_3_hessian(x::T) where T<:Real
+
+Second derivative of the `irwin_hall_3` function.
+"""
+function irwin_hall_3_hessian(x::T) where T<:Real
+    if x < zero(T)
+        return zero(T)
+    elseif x < one(T)
+        return one(T)
+    elseif x < convert(T, 2)
+        return -2 * one(T)
+    elseif x <= convert(T, 3)
+        return one(T)
+    else
+        return zero(T)
+    end
+end
+
+# ╔═╡ 434aac93-af76-4ffe-818e-baa7063007fd
+"""
+    periodic(f::Function, period::Integer)
+
+Create a periodic version of function f with given period.
+"""
+function periodic(f::Function, period::Integer)
+	# Enough for our use case to repeat 3 times
+    return x -> f(x + period) + f(x) + f(x - period)
+end
+
+# ╔═╡ b4540522-7167-4f8a-8b01-cc5255dc80d9
+"""
+    P(π::Vector{T}) where T<:Real
+
+Construct an approximate permutation matrix from vector `π` using the basis function `f`.
+Each element `π[i]` represents the approximate position in the permutation.
+
+# Arguments
+- `π::Vector{T}`: Vector representing an approximate permutation
+
+# Returns
+- A matrix `P` where `P[i,j] = f(π[i] - j)`
+"""
+function P(π::Vector{T}) where T<:Real
+	n = size(π, 1)
+	f = periodic(x -> irwin_hall_3(x + 3/2), n)
+	[ f(π[i] - j) for i in 1:n, j in 1:n ]
+end
+
+# ╔═╡ d0281b9e-3c7c-4a15-8e65-0cf8da43d2ce
+function S(A::AbstractMatrix, P::AbstractMatrix)
+    n = size(A, 1)
+    return norm(A - P * A * P', 2) / (n * (n - 1))
+end
+
+# ╔═╡ 4ac66a2b-3ade-4fca-91a5-b3db1f1e5064
+S(B, Matrix{Float64}(to_permutation_matrix(σ)))
+
+# ╔═╡ 55c53f02-af63-485a-8d43-b8fb8ef235a8
 """
     to_permutation_matrix(perm::AbstractVector{Int})
 
@@ -1530,47 +586,425 @@ function to_permutation_matrix(perm::AbstractVector{Int})
     end
 end
 
-# ╔═╡ 76894710-56b3-41e9-a918-5dc754007739
-# ╠═╡ disabled = true
-#=╠═╡
-D = sinkhorn_knopp(rand(4, 4))
-  ╠═╡ =#
+# ╔═╡ 22b1cee0-2ec5-4307-8e90-c240683bae53
+md"""
+---
+"""
 
-# ╔═╡ 216c2afe-1524-4678-9827-2cf92faa362a
-#=╠═╡
-D = shuffle(1:4) |> P
-  ╠═╡ =#
+# ╔═╡ df0f80bb-2184-4f47-a58a-e6ef05523ff7
+begin
+	"""
+	    get_perm_file_path(base_name, sim_idx, permutations_dir)
+	
+	Get the path to a permutation file.
+	"""
+	function get_perm_file_path(base_name, sim_idx, permutations_dir)
+	    return joinpath(permutations_dir, "$(base_name)_sim$(sim_idx-1).csv")
+	end
+	
+	"""
+	    get_timing_file_path(base_name, sim_idx, timing_dir)
+	
+	Get the path to a timing file for a specific simulation.
+	"""
+	function get_timing_file_path(base_name, sim_idx, timing_dir)
+	    return joinpath(timing_dir, "$(base_name)_sim$(sim_idx-1)_timing.csv")
+	end
+	
+	"""
+	    get_s_metric_file_path(base_name, sim_idx, s_dir)
+	
+	Get the path to an S metric file for a specific simulation.
+	"""
+	function get_s_metric_file_path(base_name, sim_idx, s_dir)
+	    return joinpath(s_dir, "$(base_name)_sim$(sim_idx-1)_s_metric.csv")
+	end
+	
+	"""
+	    results_exist(base_name, sim_idx, permutations_dir, timing_dir, s_dir)
+	
+	Check if all result files for a simulation already exist.
+	"""
+	function results_exist(base_name, sim_idx, permutations_dir, timing_dir, s_dir)
+	    perm_file = get_perm_file_path(base_name, sim_idx, permutations_dir)
+	    timing_file = get_timing_file_path(base_name, sim_idx, timing_dir)
+	    s_file = get_s_metric_file_path(base_name, sim_idx, s_dir)
+	    
+	    return isfile(perm_file) && isfile(timing_file) && isfile(s_file)
+	end
+	
+	"""
+	    save_timing_for_simulation(base_name, sim_idx, sim_times, timing_dir, num_runs)
+	
+	Save timing data for a single simulation.
+	"""
+	function save_timing_for_simulation(base_name, sim_idx, sim_times, timing_dir, num_runs)
+	    timing_file = get_timing_file_path(base_name, sim_idx, timing_dir)
+	    
+	    # Create DataFrame for timing data
+	    time_df = DataFrame()
+	    time_df.run = 1:num_runs
+	    time_df.time = sim_times
+	    
+	    # Ensure the directory exists
+	    mkpath(dirname(timing_file))
+	    
+	    # Save to CSV
+	    CSV.write(timing_file, time_df)
+	end
+	
+	"""
+	    save_s_metric_for_simulation(base_name, sim_idx, s_values, s_dir, num_runs)
+	
+	Save S metric values for a single simulation.
+	"""
+	function save_s_metric_for_simulation(base_name, sim_idx, s_values, s_dir, num_runs)
+	    s_file = get_s_metric_file_path(base_name, sim_idx, s_dir)
+	    
+	    # Create DataFrame for S metric data
+	    s_df = DataFrame()
+	    s_df.run = 1:num_runs
+	    s_df.s_metric = s_values
+	    
+	    # Ensure the directory exists
+	    mkpath(dirname(s_file))
+	    
+	    # Save to CSV
+	    CSV.write(s_file, s_df)
+	end
+	
+	"""
+	    process_instance_simulation(matrix, sim_idx, base_name, permutations_dir, timing_dir, s_dir, num_runs, method)
+	
+	Process a single simulation of an instance and save results.
+	Uses the provided method to compute permutation matrices.
+	"""
+	function process_instance_simulation(matrix, sim_idx, base_name, permutations_dir, timing_dir, s_dir, num_runs, method)
+	    # Run the algorithm multiple times
+	    sim_times = zeros(num_runs)
+	    sim_permutations = []
+	    sim_s_values = zeros(num_runs)
+	    
+	    for run in 1:num_runs
+	        P, run_time = method(matrix)
+	        sim_times[run] = run_time
+	        push!(sim_permutations, P)
+	        
+	        # Calculate S(A) metric
+	        sim_s_values[run] = S(matrix, P)
+	    end
+	    
+	    # Save permutation matrices for this simulation
+	    perm_file = get_perm_file_path(base_name, sim_idx, permutations_dir)
+	    
+	    # Convert permutations to a format suitable for CSV
+	    n = size(sim_permutations[1], 1)
+	    perm_df = DataFrame()
+	    
+	    for run in 1:num_runs
+	        P = sim_permutations[run]
+	        # Find where each row has a 1 (the destination node)
+	        destinations = [findfirst(x -> x == 1, P[i, :]) for i in 1:n]
+	        perm_df[!, "run$run"] = destinations
+	    end
+	    
+	    # Ensure directories exist
+	    mkpath(dirname(perm_file))
+	    
+	    # Save permutation data
+	    CSV.write(perm_file, perm_df)
+	    
+	    # Save timing data
+	    save_timing_for_simulation(base_name, sim_idx, sim_times, timing_dir, num_runs)
+	    
+	    # Save S metric data
+	    save_s_metric_for_simulation(base_name, sim_idx, sim_s_values, s_dir, num_runs)
+	    
+	    return sim_times, sim_s_values
+	end
+	
+	"""
+	    load_existing_timing_data(timing_dir)
+	
+	Load existing timing data from individual timing files.
+	"""
+	function load_existing_timing_data(timing_dir)
+	    timing_data = Dict()
+	    
+	    if !isdir(timing_dir)
+	        return timing_data
+	    end
+	    
+	    for file in readdir(timing_dir)
+	        if endswith(file, "_timing.csv")
+	            # Extract base_name and sim_idx from filename
+	            match_result = match(r"(.+)_sim(\d+)_timing\.csv", file)
+	            if match_result !== nothing
+	                base_name = match_result.captures[1]
+	                sim_idx = parse(Int, match_result.captures[2]) + 1  # Convert from 0-based to 1-based
+	                
+	                # Initialize base_name dict if not exists
+	                if !haskey(timing_data, base_name)
+	                    timing_data[base_name] = Dict()
+	                end
+	                
+	                # Read the timing file
+	                timing_file = joinpath(timing_dir, file)
+	                df = CSV.read(timing_file, DataFrame)
+	                
+	                # Store the timing data
+	                timing_data[base_name][sim_idx] = df.time
+	            end
+	        end
+	    end
+	    
+	    return timing_data
+	end
+	
+	"""
+	    load_existing_s_metric_data(s_dir)
+	
+	Load existing S metric data from individual files.
+	"""
+	function load_existing_s_metric_data(s_dir)
+	    s_data = Dict()
+	    
+	    if !isdir(s_dir)
+	        return s_data
+	    end
+	    
+	    for file in readdir(s_dir)
+	        if endswith(file, "_s_metric.csv")
+	            # Extract base_name and sim_idx from filename
+	            match_result = match(r"(.+)_sim(\d+)_s_metric\.csv", file)
+	            if match_result !== nothing
+	                base_name = match_result.captures[1]
+	                sim_idx = parse(Int, match_result.captures[2]) + 1  # Convert from 0-based to 1-based
+	                
+	                # Initialize base_name dict if not exists
+	                if !haskey(s_data, base_name)
+	                    s_data[base_name] = Dict()
+	                end
+	                
+	                # Read the S metric file
+	                s_file = joinpath(s_dir, file)
+	                df = CSV.read(s_file, DataFrame)
+	                
+	                # Store the S metric data
+	                s_data[base_name][sim_idx] = df.s_metric
+	            end
+	        end
+	    end
+	    
+	    return s_data
+	end
+	
+	"""
+	    compile_and_save_timing_summary(timing_dir, output_file, num_runs)
+	
+	Compile all individual timing files into a summary CSV.
+	"""
+	function compile_and_save_timing_summary(timing_dir, output_file, num_runs)
+	    # Load all timing data
+	    timing_data = load_existing_timing_data(timing_dir)
+	    
+	    # Pre-define column names
+	    col_names = ["base_name", "simulation"]
+	    append!(col_names, ["run$i" for i in 1:num_runs])
+	    
+	    # Initialize DataFrame with column names
+	    time_df = DataFrame([name => [] for name in col_names])
+	    
+	    # Collect all base names
+	    all_base_names = sort(collect(keys(timing_data)))
+	    
+	    # For each base name
+	    for base_name in all_base_names
+	        # For each simulation
+	        for sim_idx in sort(collect(keys(timing_data[base_name])))
+	            # Create a row with base_name, simulation number, and times
+	            row = Dict{String, Any}()
+	            row["base_name"] = base_name
+	            row["simulation"] = sim_idx - 1  # Convert to 0-based for output
+	            
+	            for run in 1:num_runs
+	                if run <= length(timing_data[base_name][sim_idx])
+	                    row["run$run"] = timing_data[base_name][sim_idx][run]
+	                else
+	                    row["run$run"] = NaN  # Handle missing data
+	                end
+	            end
+	            
+	            push!(time_df, row)
+	        end
+	    end
+	    
+	    # Save the summary CSV
+	    CSV.write(output_file, time_df)
+	end
+	
+	"""
+	    compile_and_save_s_metric_summary(s_dir, output_file, num_runs)
+	
+	Compile all individual S metric files into a summary CSV.
+	"""
+	function compile_and_save_s_metric_summary(s_dir, output_file, num_runs)
+	    # Load all S metric data
+	    s_data = load_existing_s_metric_data(s_dir)
+	    
+	    # Pre-define column names
+	    col_names = ["base_name", "simulation"]
+	    append!(col_names, ["run$i" for i in 1:num_runs])
+	    
+	    # Initialize DataFrame with column names
+	    s_df = DataFrame([name => [] for name in col_names])
+	    
+	    # Collect all base names
+	    all_base_names = sort(collect(keys(s_data)))
+	    
+	    # For each base name
+	    for base_name in all_base_names
+	        # For each simulation
+	        for sim_idx in sort(collect(keys(s_data[base_name])))
+	            # Create a row with base_name, simulation number, and S values
+	            row = Dict{String, Any}()
+	            row["base_name"] = base_name
+	            row["simulation"] = sim_idx - 1  # Convert to 0-based for output
+	            
+	            for run in 1:num_runs
+	                if run <= length(s_data[base_name][sim_idx])
+	                    row["run$run"] = s_data[base_name][sim_idx][run]
+	                else
+	                    row["run$run"] = NaN  # Handle missing data
+	                end
+	            end
+	            
+	            push!(s_df, row)
+	        end
+	    end
+	    
+	    # Save the summary CSV
+	    CSV.write(output_file, s_df)
+	end
+	
+	"""
+	    process_dataset(input_dir, output_dir, method; method_name="ApproxSymmetry", method_version="v1", 
+	                    num_runs=5, force_recompute=false)
+	
+	Process all matrices in the dataset and save results in the specified format.
+	Can resume from interrupted execution unless force_recompute is true.
+	Uses the provided method function to compute permutation matrices.
+	"""
+	function process_dataset(input_dir, output_dir, method; 
+	                        method_name="ApproxSymmetry", 
+	                        method_version="v1", 
+	                        num_runs=5, 
+	                        force_recompute=false)
+	    # Create output directories
+	    method_dir = joinpath(output_dir, method_name)
+	    version_dir = joinpath(method_dir, method_version)
+	    mkpath(version_dir)
+	    
+	    @info "Collecting instances from $input_dir"
+	    # Collect all instance data
+	    instances = collect_instances(input_dir)
+	    
+	    # Group instances by graph type
+	    graph_types = unique([inst.graph_type for inst in instances])
+	    
+	    for graph_type in graph_types
+	        @info "Processing graph type: $graph_type"
+	        
+	        # Get instances for this graph type
+	        type_instances = filter(i -> i.graph_type == graph_type, instances)
+	        
+	        # Create output directories for this model
+	        model_output_dir = joinpath(version_dir, graph_type)
+	        permutations_dir = joinpath(model_output_dir, "Permutations")
+	        timing_dir = joinpath(model_output_dir, "Timing")
+	        s_dir = joinpath(model_output_dir, "S_Metric")
+	        mkpath(permutations_dir)
+	        mkpath(timing_dir)
+	        mkpath(s_dir)
+	        
+	        for instance in type_instances
+	            # Extract base filename without extension
+	            base_name = replace(basename(instance.path), r"\.npz$" => "")
+	            
+	            @info "  Processing instance: $base_name"
+	            
+	            # Load the data only if we need to process at least one simulation
+	            data = nothing
+	            
+	            # Process each simulation
+	            for sim_idx in 1:39
+	                # Check if results already exist
+	                if !force_recompute && results_exist(base_name, sim_idx, permutations_dir, timing_dir, s_dir)
+	                    @info "    Simulation $(sim_idx-1): Already processed, skipping"
+	                    continue
+	                end
+	                
+	                # Lazy loading of data
+	                if data === nothing
+	                    @debug "    Loading data for instance $base_name"
+	                    data = load_instance_data(instance)
+	                end
+	                
+	                @info "    Simulation $(sim_idx-1): Processing..."
+	                
+	        		matrix = data["$(sim_idx-1)"]
+	                
+	                # Process the simulation and save results
+	                process_instance_simulation(
+	                    matrix, sim_idx, base_name, permutations_dir, timing_dir, s_dir, num_runs, method
+	                )
+	            end
+	        end
+	        
+	        # Compile and save timing summary for this graph type
+	        @info "Compiling timing summary for $graph_type"
+	        time_summary_file = joinpath(model_output_dir, "$(method_name)_time_$(graph_type).csv")
+	        compile_and_save_timing_summary(timing_dir, time_summary_file, num_runs)
+	        
+	        # Compile and save S metric summary for this graph type
+	        @info "Compiling S metric summary for $graph_type"
+	        s_summary_file = joinpath(model_output_dir, "$(method_name)_s_metric_$(graph_type).csv")
+	        compile_and_save_s_metric_summary(s_dir, s_summary_file, num_runs)
+	    end
+	    
+	    @info "Processing completed."
+	end
+end
 
 # ╔═╡ 00000000-0000-0000-0000-000000000001
 PLUTO_PROJECT_TOML_CONTENTS = """
 [deps]
-ADTypes = "47edcb42-4c32-4615-8424-f2b9edc5f35b"
-ForwardDiff = "f6369f11-7733-5829-9624-2563aa707210"
+CSV = "336ed68f-0bac-5ca0-87d4-7b16caf5d00b"
+DataFrames = "a93c6f00-e57d-5684-b7b6-d8193f3e46c0"
 Ipopt = "b6b21f68-93f8-5de0-b562-5493be1d77c9"
 LazyArrays = "5078a376-72f3-5289-bfd5-ec5146d43c02"
 LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
-LogExpFunctions = "2ab3a3ac-af41-5b50-aa03-7779005ae688"
+Logging = "56ddb016-857b-54e1-b83d-db4d58db5568"
 NPZ = "15e1cf62-19b3-5cfa-8e77-841668bca605"
 Optimization = "7f7a1694-90dd-40f0-9382-eb1efda571ba"
 OptimizationMOI = "fd9f6733-72f4-499f-8506-86b2bdd0dea1"
-OptimizationOptimJL = "36348300-93cb-4f02-beb5-3c3902f8871e"
 Plots = "91a5bcdd-55d7-5caf-9e0b-520d859cae80"
+Pluto = "c3e4b0f8-55cb-11ea-2926-15256bba5781"
+PlutoUI = "7f904dfe-b85e-4ff6-b463-dae2292396a8"
 Random = "9a3f8284-a2c9-5f02-9a11-845980a1fd5c"
 SparseArrays = "2f01184e-e22b-5df5-ae63-d93ebab69eaf"
-Zygote = "e88e6eb3-aa80-5325-afca-941959d7151f"
 
 [compat]
-ADTypes = "~1.13.0"
-ForwardDiff = "~0.10.38"
+CSV = "~0.10.15"
+DataFrames = "~1.7.0"
 Ipopt = "~1.7.2"
 LazyArrays = "~2.6.1"
-LogExpFunctions = "~0.3.29"
 NPZ = "~0.4.3"
 Optimization = "~4.1.1"
 OptimizationMOI = "~0.5.2"
-OptimizationOptimJL = "~0.4.1"
 Plots = "~1.40.9"
-Zygote = "~0.6.75"
+Pluto = "~0.20.4"
+PlutoUI = "~0.7.23"
 """
 
 # ╔═╡ 00000000-0000-0000-0000-000000000002
@@ -1579,7 +1013,7 @@ PLUTO_MANIFEST_TOML_CONTENTS = """
 
 julia_version = "1.11.3"
 manifest_format = "2.0"
-project_hash = "96177c6bc0217e2062cedda1db4321dd98484ca6"
+project_hash = "945373cbf3040e4896efbafbfecc3b9cfda1ff95"
 
 [[deps.ADTypes]]
 git-tree-sha1 = "fb97701c117c8162e84dfcf80215caa904aef44f"
@@ -1598,16 +1032,11 @@ git-tree-sha1 = "6252039f98492252f9e47c312c8ffda0e3b9e78d"
 uuid = "ae81ac8f-d209-56e5-92de-9978fef736f9"
 version = "0.1.3+0"
 
-[[deps.AbstractFFTs]]
-deps = ["LinearAlgebra"]
-git-tree-sha1 = "d92ad398961a3ed262d8bf04a1a2b8340f915fef"
-uuid = "621f4979-c628-5d54-868e-fcf4e3e8185c"
-version = "1.5.0"
-weakdeps = ["ChainRulesCore", "Test"]
-
-    [deps.AbstractFFTs.extensions]
-    AbstractFFTsChainRulesCoreExt = "ChainRulesCore"
-    AbstractFFTsTestExt = "Test"
+[[deps.AbstractPlutoDingetjes]]
+deps = ["Pkg"]
+git-tree-sha1 = "6e1d2a35f2f90a4bc7c2ed98079b2ba09c35b83a"
+uuid = "6e696c72-6542-2067-7265-42206c756150"
+version = "1.3.2"
 
 [[deps.AbstractTrees]]
 git-tree-sha1 = "2d9c9a55f9c93e8887ad391fbae72f8ef55e1177"
@@ -1711,24 +1140,6 @@ weakdeps = ["SparseArrays"]
 uuid = "56f22d72-fd6d-98f1-02f0-08ddc0907c33"
 version = "1.11.0"
 
-[[deps.Atomix]]
-deps = ["UnsafeAtomics"]
-git-tree-sha1 = "b5bb4dc6248fde467be2a863eb8452993e74d402"
-uuid = "a9b6321e-bd34-4604-b9c9-b65b8de01458"
-version = "1.1.1"
-
-    [deps.Atomix.extensions]
-    AtomixCUDAExt = "CUDA"
-    AtomixMetalExt = "Metal"
-    AtomixOpenCLExt = "OpenCL"
-    AtomixoneAPIExt = "oneAPI"
-
-    [deps.Atomix.weakdeps]
-    CUDA = "052768ef-5323-5732-b1bb-66c8b64840ba"
-    Metal = "dde4c033-4e86-420c-a63e-0dd931031962"
-    OpenCL = "08131aa3-fb12-5dee-8b74-c09406e224a2"
-    oneAPI = "8f75cd03-7ff8-4ecb-9b8f-daf728133b1b"
-
 [[deps.Base64]]
 uuid = "2a0f44e3-6c83-55bd-87e4-b1978d98bd5f"
 version = "1.11.0"
@@ -1783,11 +1194,6 @@ git-tree-sha1 = "1b96ea4a01afe0ea4090c5c8039690672dd13f2e"
 uuid = "6e34b625-4abd-537c-b88f-471c36dfa7a0"
 version = "1.0.9+0"
 
-[[deps.CEnum]]
-git-tree-sha1 = "389ad5c84de1ae7cf0e28e381131c98ea87d54fc"
-uuid = "fa961155-64e5-5f13-b03f-caf6b980ea82"
-version = "0.5.0"
-
 [[deps.CPUSummary]]
 deps = ["CpuId", "IfElse", "PrecompileTools", "Static"]
 git-tree-sha1 = "5a97e67919535d6841172016c9530fd69494e5ec"
@@ -1800,17 +1206,17 @@ git-tree-sha1 = "0157e592151e39fa570645e2b2debcdfb8a0f112"
 uuid = "00ebfdb7-1f24-5e51-bd34-a7502290713f"
 version = "3.4.3"
 
+[[deps.CSV]]
+deps = ["CodecZlib", "Dates", "FilePathsBase", "InlineStrings", "Mmap", "Parsers", "PooledArrays", "PrecompileTools", "SentinelArrays", "Tables", "Unicode", "WeakRefStrings", "WorkerUtilities"]
+git-tree-sha1 = "deddd8725e5e1cc49ee205a1964256043720a6c3"
+uuid = "336ed68f-0bac-5ca0-87d4-7b16caf5d00b"
+version = "0.10.15"
+
 [[deps.Cairo_jll]]
 deps = ["Artifacts", "Bzip2_jll", "CompilerSupportLibraries_jll", "Fontconfig_jll", "FreeType2_jll", "Glib_jll", "JLLWrappers", "LZO_jll", "Libdl", "Pixman_jll", "Xorg_libXext_jll", "Xorg_libXrender_jll", "Zlib_jll", "libpng_jll"]
 git-tree-sha1 = "009060c9a6168704143100f36ab08f06c2af4642"
 uuid = "83423d85-b0ee-5818-9007-b63ccbeb887a"
 version = "1.18.2+1"
-
-[[deps.ChainRules]]
-deps = ["Adapt", "ChainRulesCore", "Compat", "Distributed", "GPUArraysCore", "IrrationalConstants", "LinearAlgebra", "Random", "RealDot", "SparseArrays", "SparseInverseSubset", "Statistics", "StructArrays", "SuiteSparse"]
-git-tree-sha1 = "a975ae558af61a2a48720a6271661bf2621e0f4e"
-uuid = "082447d4-558c-5d27-93f4-14fc19e9eca2"
-version = "1.72.3"
 
 [[deps.ChainRulesCore]]
 deps = ["Compat", "LinearAlgebra"]
@@ -1939,6 +1345,12 @@ git-tree-sha1 = "d9d26935a0bcffc87d2613ce14c527c99fc543fd"
 uuid = "f0e56b4a-5159-44fe-b623-3e5288b988bb"
 version = "2.5.0"
 
+[[deps.Configurations]]
+deps = ["ExproniconLite", "OrderedCollections", "TOML"]
+git-tree-sha1 = "4358750bb58a3caefd5f37a4a0c5bfdbbf075252"
+uuid = "5218b696-f38b-4ac9-8b61-a12ec717816d"
+version = "0.17.6"
+
 [[deps.ConsoleProgressMonitor]]
 deps = ["Logging", "ProgressMeter"]
 git-tree-sha1 = "3ab7b2136722890b9af903859afcf457fa3059e8"
@@ -1976,6 +1388,12 @@ version = "4.1.1"
 git-tree-sha1 = "abe83f3a2f1b857aac70ef8b269080af17764bbe"
 uuid = "9a962f9c-6df0-11e9-0e5d-c546b8b5ee8a"
 version = "1.16.0"
+
+[[deps.DataFrames]]
+deps = ["Compat", "DataAPI", "DataStructures", "Future", "InlineStrings", "InvertedIndices", "IteratorInterfaceExtensions", "LinearAlgebra", "Markdown", "Missings", "PooledArrays", "PrecompileTools", "PrettyTables", "Printf", "Random", "Reexport", "SentinelArrays", "SortingAlgorithms", "Statistics", "TableTraits", "Tables", "Unicode"]
+git-tree-sha1 = "fb61b4812c49343d7ef0b533ba982c46021938a6"
+uuid = "a93c6f00-e57d-5684-b7b6-d8193f3e46c0"
+version = "1.7.0"
 
 [[deps.DataStructures]]
 deps = ["Compat", "InteractiveUtils", "OrderedCollections"]
@@ -2235,6 +1653,11 @@ git-tree-sha1 = "27415f162e6028e81c72b82ef756bf321213b6ec"
 uuid = "e2ba6199-217a-4e67-a87a-7c52f15ade04"
 version = "0.1.10"
 
+[[deps.ExpressionExplorer]]
+git-tree-sha1 = "71d0768dd78ad62d3582091bf338d98af8bbda67"
+uuid = "21656369-7473-754a-2065-74616d696c43"
+version = "1.1.1"
+
 [[deps.Expronicon]]
 deps = ["MLStyle", "Pkg", "TOML"]
 git-tree-sha1 = "fc3951d4d398b5515f91d7fe5d45fc31dccb3c9b"
@@ -2299,6 +1722,17 @@ weakdeps = ["HTTP"]
 
     [deps.FileIO.extensions]
     HTTPExt = "HTTP"
+
+[[deps.FilePathsBase]]
+deps = ["Compat", "Dates"]
+git-tree-sha1 = "2ec417fc319faa2d768621085cc1feebbdee686b"
+uuid = "48062228-2e41-5def-b9a4-89aafe57970f"
+version = "0.9.23"
+weakdeps = ["Mmap", "Test"]
+
+    [deps.FilePathsBase.extensions]
+    FilePathsBaseMmapExt = "Mmap"
+    FilePathsBaseTestExt = "Test"
 
 [[deps.FileWatching]]
 uuid = "7b1f6079-737a-58dc-b8bc-7a2ca5c1b5ee"
@@ -2400,17 +1834,17 @@ deps = ["Random"]
 uuid = "9fa8497b-333b-5362-9e8d-4d0656e87820"
 version = "1.11.0"
 
+[[deps.FuzzyCompletions]]
+deps = ["REPL"]
+git-tree-sha1 = "be713866335f48cfb1285bff2d0cbb8304c1701c"
+uuid = "fb4132e2-a121-4a70-b8a1-d5b831dcdcc2"
+version = "0.5.5"
+
 [[deps.GLFW_jll]]
 deps = ["Artifacts", "JLLWrappers", "Libdl", "Libglvnd_jll", "Xorg_libXcursor_jll", "Xorg_libXi_jll", "Xorg_libXinerama_jll", "Xorg_libXrandr_jll", "libdecor_jll", "xkbcommon_jll"]
 git-tree-sha1 = "fcb0584ff34e25155876418979d4c8971243bb89"
 uuid = "0656b61e-2033-5cc2-a64a-77c0f6c09b89"
 version = "3.4.0+2"
-
-[[deps.GPUArrays]]
-deps = ["Adapt", "GPUArraysCore", "KernelAbstractions", "LLVM", "LinearAlgebra", "Printf", "Random", "Reexport", "ScopedValues", "Serialization", "Statistics"]
-git-tree-sha1 = "eea7b3a1964b4de269bb380462a9da604be7fcdb"
-uuid = "0c68f7d7-f131-5f86-a1c3-88cf8149b2d7"
-version = "11.2.2"
 
 [[deps.GPUArraysCore]]
 deps = ["Adapt"]
@@ -2476,11 +1910,6 @@ git-tree-sha1 = "55c53be97790242c29031e5cd45e8ac296dadda3"
 uuid = "2e76f6c2-a576-52d4-95c1-20adfe4de566"
 version = "8.5.0+0"
 
-[[deps.HashArrayMappedTries]]
-git-tree-sha1 = "2eaa69a7cab70a52b9687c8bf950a5a93ec895ae"
-uuid = "076d061b-32b6-4027-95e0-9a2c6f6d7e74"
-version = "0.2.0"
-
 [[deps.Hwloc_jll]]
 deps = ["Artifacts", "JLLWrappers", "Libdl"]
 git-tree-sha1 = "f93a9ce66cd89c9ba7a4695a47fd93b4c6bc59fa"
@@ -2493,11 +1922,23 @@ git-tree-sha1 = "2bd56245074fab4015b9174f24ceba8293209053"
 uuid = "34004b35-14d8-5ef3-9330-4cdb6864b03a"
 version = "0.3.27"
 
-[[deps.IRTools]]
-deps = ["InteractiveUtils", "MacroTools"]
-git-tree-sha1 = "950c3717af761bc3ff906c2e8e52bd83390b6ec2"
-uuid = "7869d1d1-7146-5819-86e3-90919afe41df"
-version = "0.4.14"
+[[deps.Hyperscript]]
+deps = ["Test"]
+git-tree-sha1 = "8d511d5b81240fc8e6802386302675bdf47737b9"
+uuid = "47d2ed2b-36de-50cf-bf87-49c2cf4b8b91"
+version = "0.0.4"
+
+[[deps.HypertextLiteral]]
+deps = ["Tricks"]
+git-tree-sha1 = "7134810b1afce04bbc1045ca1985fbe81ce17653"
+uuid = "ac1192a8-f4b3-4bfe-ba22-af5b92cd3ab2"
+version = "0.9.5"
+
+[[deps.IOCapture]]
+deps = ["Logging", "Random"]
+git-tree-sha1 = "b6d6bfdd7ce25b0f9b2f6b3dd56b2673a66c8770"
+uuid = "b5f81e59-6552-4d32-b1f0-c071b021bf89"
+version = "0.2.5"
 
 [[deps.IfElse]]
 git-tree-sha1 = "debdd00ffef04665ccbb3e150747a77560e8fad1"
@@ -2508,6 +1949,19 @@ version = "0.1.1"
 git-tree-sha1 = "d1b1b796e47d94588b3757fe84fbf65a5ec4a80d"
 uuid = "d25df0c9-e2be-5dd7-82c8-3ad0b3e990b9"
 version = "0.1.5"
+
+[[deps.InlineStrings]]
+git-tree-sha1 = "6a9fde685a7ac1eb3495f8e812c5a7c3711c2d5e"
+uuid = "842dd82b-1e85-43dc-bf29-5d0ee9dffc48"
+version = "1.4.3"
+
+    [deps.InlineStrings.extensions]
+    ArrowTypesExt = "ArrowTypes"
+    ParsersExt = "Parsers"
+
+    [deps.InlineStrings.weakdeps]
+    ArrowTypes = "31f734f8-188a-4ce0-8406-c8a06bd891cd"
+    Parsers = "69de0a69-1ddd-5017-9359-2bf0b02dc9f0"
 
 [[deps.IntegerMathUtils]]
 git-tree-sha1 = "b8ffb903da9f7b8cf695a8bead8e01814aa24b30"
@@ -2545,6 +1999,11 @@ weakdeps = ["Dates", "Test"]
     [deps.InverseFunctions.extensions]
     InverseFunctionsDatesExt = "Dates"
     InverseFunctionsTestExt = "Test"
+
+[[deps.InvertedIndices]]
+git-tree-sha1 = "6da3c4316095de0f5ee2ebd875df8721e7e0bdbe"
+uuid = "41ab1584-1d38-5bbf-9106-f11c6c58b48f"
+version = "1.3.1"
 
 [[deps.Ipopt]]
 deps = ["Ipopt_jll", "LinearAlgebra", "MathOptInterface", "OpenBLAS32_jll", "PrecompileTools"]
@@ -2623,18 +2082,6 @@ uuid = "ccbc3e58-028d-4f4c-8cd5-9ae44345cda5"
 version = "9.14.2"
 weakdeps = ["FastBroadcast"]
 
-[[deps.KernelAbstractions]]
-deps = ["Adapt", "Atomix", "InteractiveUtils", "MacroTools", "PrecompileTools", "Requires", "StaticArrays", "UUIDs"]
-git-tree-sha1 = "80d268b2f4e396edc5ea004d1e0f569231c71e9e"
-uuid = "63c18a36-062a-441e-b654-da1e3ab1ce7c"
-version = "0.9.34"
-weakdeps = ["EnzymeCore", "LinearAlgebra", "SparseArrays"]
-
-    [deps.KernelAbstractions.extensions]
-    EnzymeExt = "EnzymeCore"
-    LinearAlgebraExt = "LinearAlgebra"
-    SparseArraysExt = "SparseArrays"
-
 [[deps.Krylov]]
 deps = ["LinearAlgebra", "Printf", "SparseArrays"]
 git-tree-sha1 = "b29d37ce30fa401a4563b18880ab91f979a29734"
@@ -2658,24 +2105,6 @@ deps = ["Artifacts", "JLLWrappers", "Libdl"]
 git-tree-sha1 = "aaafe88dccbd957a8d82f7d05be9b69172e0cee3"
 uuid = "88015f11-f218-50d7-93a8-a6af411a945d"
 version = "4.0.1+0"
-
-[[deps.LLVM]]
-deps = ["CEnum", "LLVMExtra_jll", "Libdl", "Preferences", "Printf", "Unicode"]
-git-tree-sha1 = "5fcfea6df2ff3e4da708a40c969c3812162346df"
-uuid = "929cbde3-209d-540e-8aea-75f648917ca0"
-version = "9.2.0"
-
-    [deps.LLVM.extensions]
-    BFloat16sExt = "BFloat16s"
-
-    [deps.LLVM.weakdeps]
-    BFloat16s = "ab4f0b2a-ad5b-11e8-123f-65d77653426b"
-
-[[deps.LLVMExtra_jll]]
-deps = ["Artifacts", "JLLWrappers", "LazyArtifacts", "Libdl", "TOML"]
-git-tree-sha1 = "4b5ad6a4ffa91a00050a964492bc4f86bb48cea0"
-uuid = "dad2f222-ce93-54a1-a47d-0025e8a3acab"
-version = "0.0.35+0"
 
 [[deps.LLVMOpenMP_jll]]
 deps = ["Artifacts", "JLLWrappers", "Libdl"]
@@ -2721,6 +2150,11 @@ deps = ["ArrayInterface", "LinearAlgebra", "ManualMemory", "SIMDTypes", "Static"
 git-tree-sha1 = "a9eaadb366f5493a5654e843864c13d8b107548c"
 uuid = "10f19ff3-798f-405d-979b-55457f8fc047"
 version = "0.1.17"
+
+[[deps.LazilyInitializedFields]]
+git-tree-sha1 = "0f2da712350b020bc3957f269c9caad516383ee0"
+uuid = "0e77f7df-68c5-4e49-93ce-4cd80f5598bf"
+version = "1.3.0"
 
 [[deps.LazyArrays]]
 deps = ["ArrayLayouts", "FillArrays", "LinearAlgebra", "MacroTools", "SparseArrays"]
@@ -2923,6 +2357,11 @@ git-tree-sha1 = "2eefa8baa858871ae7770c98c3c2a7e46daba5b4"
 uuid = "d00139f3-1899-568f-a2f0-47f597d42d70"
 version = "5.1.3+0"
 
+[[deps.MIMEs]]
+git-tree-sha1 = "1833212fd6f580c20d4291da9c1b4e8a655b128e"
+uuid = "6c6e2e6c-3030-632d-7369-2d6c69616d65"
+version = "1.0.0"
+
 [[deps.MKL_jll]]
 deps = ["Artifacts", "IntelOpenMP_jll", "JLLWrappers", "LazyArtifacts", "Libdl", "oneTBB_jll"]
 git-tree-sha1 = "5de60bc6cb3899cd318d80d627560fae2e2d99ae"
@@ -2944,6 +2383,12 @@ version = "500.700.301+0"
 git-tree-sha1 = "72aebe0b5051e5143a079a4685a46da330a40472"
 uuid = "1914dd2f-81c6-5fcd-8719-6d5c9610ff09"
 version = "0.5.15"
+
+[[deps.Malt]]
+deps = ["Distributed", "Logging", "RelocatableFolders", "Serialization", "Sockets"]
+git-tree-sha1 = "02a728ada9d6caae583a0f87c1dd3844f99ec3fd"
+uuid = "36869731-bdee-424d-aa32-cab38c994e3b"
+version = "1.1.2"
 
 [[deps.ManualMemory]]
 git-tree-sha1 = "bcaef4fc7a0cfe2cba636d84cda54b5e4e4ca3cd"
@@ -3028,6 +2473,12 @@ version = "0.3.5"
 [[deps.MozillaCACerts_jll]]
 uuid = "14a3606d-f60d-562e-9121-12d972cd8159"
 version = "2023.12.12"
+
+[[deps.MsgPack]]
+deps = ["Serialization"]
+git-tree-sha1 = "f5db02ae992c260e4826fe78c942954b48e1d9c2"
+uuid = "99f44e22-a591-53d1-9472-aa23ef4bd671"
+version = "1.2.1"
 
 [[deps.MuladdMacro]]
 git-tree-sha1 = "cac9cc5499c25554cba55cd3c30543cff5ca4fab"
@@ -3249,12 +2700,6 @@ git-tree-sha1 = "621750051ead75cabfeb583c4083147c31ad3271"
 uuid = "fd9f6733-72f4-499f-8506-86b2bdd0dea1"
 version = "0.5.2"
 
-[[deps.OptimizationOptimJL]]
-deps = ["Optim", "Optimization", "PrecompileTools", "Reexport", "SparseArrays"]
-git-tree-sha1 = "980ec7190741db164a2923dc42d6f1e7ce2cc434"
-uuid = "36348300-93cb-4f02-beb5-3c3902f8871e"
-version = "0.4.1"
-
 [[deps.Opus_jll]]
 deps = ["Artifacts", "JLLWrappers", "Libdl"]
 git-tree-sha1 = "6703a85cb3781bd5909d48730a67205f3f31a575"
@@ -3347,6 +2792,24 @@ version = "1.40.9"
     ImageInTerminal = "d8c32880-2388-543b-8c61-d9f865259254"
     Unitful = "1986cc42-f94f-5a68-af5c-568840ba703d"
 
+[[deps.Pluto]]
+deps = ["Base64", "Configurations", "Dates", "Downloads", "ExpressionExplorer", "FileWatching", "FuzzyCompletions", "HTTP", "HypertextLiteral", "InteractiveUtils", "Logging", "LoggingExtras", "MIMEs", "Malt", "Markdown", "MsgPack", "Pkg", "PlutoDependencyExplorer", "PrecompileSignatures", "PrecompileTools", "REPL", "RegistryInstances", "RelocatableFolders", "Scratch", "Sockets", "TOML", "Tables", "URIs", "UUIDs"]
+git-tree-sha1 = "b5509a2e4d4c189da505b780e3f447d1e38a0350"
+uuid = "c3e4b0f8-55cb-11ea-2926-15256bba5781"
+version = "0.20.4"
+
+[[deps.PlutoDependencyExplorer]]
+deps = ["ExpressionExplorer", "InteractiveUtils", "Markdown"]
+git-tree-sha1 = "e0864c15334d2c4bac8137ce3359f1174565e719"
+uuid = "72656b73-756c-7461-726b-72656b6b696b"
+version = "1.2.0"
+
+[[deps.PlutoUI]]
+deps = ["AbstractPlutoDingetjes", "Base64", "Dates", "Hyperscript", "HypertextLiteral", "IOCapture", "InteractiveUtils", "JSON", "Logging", "Markdown", "Random", "Reexport", "UUIDs"]
+git-tree-sha1 = "5152abbdab6488d5eec6a01029ca6697dff4ec8f"
+uuid = "7f904dfe-b85e-4ff6-b463-dae2292396a8"
+version = "0.7.23"
+
 [[deps.PoissonRandom]]
 deps = ["Random"]
 git-tree-sha1 = "a0f1159c33f846aa77c3f30ebbc69795e5327152"
@@ -3365,11 +2828,22 @@ git-tree-sha1 = "645bed98cd47f72f67316fd42fc47dee771aefcd"
 uuid = "1d0040c9-8b98-4ee7-8388-3f51789ca0ad"
 version = "0.2.2"
 
+[[deps.PooledArrays]]
+deps = ["DataAPI", "Future"]
+git-tree-sha1 = "36d8b4b899628fb92c2749eb488d884a926614d3"
+uuid = "2dfb63ee-cc39-5dd5-95bd-886bf059d720"
+version = "1.4.3"
+
 [[deps.PositiveFactorizations]]
 deps = ["LinearAlgebra"]
 git-tree-sha1 = "17275485f373e6673f7e7f97051f703ed5b15b20"
 uuid = "85a6dd25-e78a-55b7-8502-1745935b8125"
 version = "0.2.4"
+
+[[deps.PrecompileSignatures]]
+git-tree-sha1 = "18ef344185f25ee9d51d80e179f8dad33dc48eb1"
+uuid = "91cefc8d-f054-46dc-8f8c-26e11d7c5411"
+version = "3.0.3"
 
 [[deps.PrecompileTools]]
 deps = ["Preferences"]
@@ -3382,6 +2856,12 @@ deps = ["TOML"]
 git-tree-sha1 = "9306f6085165d270f7e3db02af26a400d580f5c6"
 uuid = "21216c6a-2e73-6563-6e65-726566657250"
 version = "1.4.3"
+
+[[deps.PrettyTables]]
+deps = ["Crayons", "LaTeXStrings", "Markdown", "PrecompileTools", "Printf", "Reexport", "StringManipulation", "Tables"]
+git-tree-sha1 = "1101cd475833706e4d0e7b122218257178f48f34"
+uuid = "08abe8d2-0d0c-5749-adfa-8a2ac140af0d"
+version = "2.4.0"
 
 [[deps.Primes]]
 deps = ["IntegerMathUtils"]
@@ -3473,12 +2953,6 @@ git-tree-sha1 = "c6ec94d2aaba1ab2ff983052cf6a606ca5985902"
 uuid = "e6cf234a-135c-5ec9-84dd-332b85af5143"
 version = "1.6.0"
 
-[[deps.RealDot]]
-deps = ["LinearAlgebra"]
-git-tree-sha1 = "9f0a1b71baaf7650f4fa8a1d168c7fb6ee41f0c9"
-uuid = "c1ae055f-0cd5-4b69-90a6-9a35b1a98df9"
-version = "0.1.0"
-
 [[deps.RecipesBase]]
 deps = ["PrecompileTools"]
 git-tree-sha1 = "5c3d09cc4f31f5fc6af001c250bf1278733100ff"
@@ -3523,6 +2997,12 @@ version = "3.31.0"
 git-tree-sha1 = "45e428421666073eab6f2da5c9d310d99bb12f9b"
 uuid = "189a3867-3050-52da-a836-e630ba90ab69"
 version = "1.2.2"
+
+[[deps.RegistryInstances]]
+deps = ["LazilyInitializedFields", "Pkg", "TOML", "Tar"]
+git-tree-sha1 = "ffd19052caf598b8653b99404058fce14828be51"
+uuid = "2792f1a3-b283-48e8-9a74-f99dce5104f3"
+version = "0.1.0"
 
 [[deps.RelocatableFolders]]
 deps = ["SHA", "Scratch"]
@@ -3631,17 +3111,17 @@ git-tree-sha1 = "0444a37a25fab98adbd90baa806ee492a3af133a"
 uuid = "53ae85a6-f571-4167-b2af-e1d143709226"
 version = "1.6.1"
 
-[[deps.ScopedValues]]
-deps = ["HashArrayMappedTries", "Logging"]
-git-tree-sha1 = "1147f140b4c8ddab224c94efa9569fc23d63ab44"
-uuid = "7e506255-f358-4e82-b7e4-beb19740aa63"
-version = "1.3.0"
-
 [[deps.Scratch]]
 deps = ["Dates"]
 git-tree-sha1 = "3bac05bc7e74a75fd9cba4295cde4045d9fe2386"
 uuid = "6c6a2e73-6563-6170-7368-637461726353"
 version = "1.2.1"
+
+[[deps.SentinelArrays]]
+deps = ["Dates", "Random"]
+git-tree-sha1 = "712fb0231ee6f9120e005ccd56297abbc053e7e0"
+uuid = "91c51154-3ec4-41a3-a24f-3f23e20d615c"
+version = "1.4.8"
 
 [[deps.Serialization]]
 uuid = "9e88b42a-f829-5b0c-bbe9-9e923198166b"
@@ -3727,12 +3207,6 @@ version = "0.6.13"
     NNlib = "872c559c-99b0-510c-b3b7-b6c96a88d5cd"
     NaNMath = "77ba4419-2d1f-58cd-9bb1-8ffee604a2e3"
     SpecialFunctions = "276daf66-3868-5448-9aa4-cd146d93841b"
-
-[[deps.SparseInverseSubset]]
-deps = ["LinearAlgebra", "SparseArrays", "SuiteSparse"]
-git-tree-sha1 = "52962839426b75b3021296f7df242e40ecfc0852"
-uuid = "dc90abb0-5640-4711-901d-7e5b23a2fada"
-version = "0.1.2"
 
 [[deps.SparseMatrixColorings]]
 deps = ["ADTypes", "DataStructures", "DocStringExtensions", "LinearAlgebra", "Random", "SparseArrays"]
@@ -3832,19 +3306,11 @@ git-tree-sha1 = "f35f6ab602df8413a50c4a25ca14de821e8605fb"
 uuid = "7792a7ef-975c-4747-a70f-980b88e8d1da"
 version = "0.5.7"
 
-[[deps.StructArrays]]
-deps = ["ConstructionBase", "DataAPI", "Tables"]
-git-tree-sha1 = "5a3a31c41e15a1e042d60f2f4942adccba05d3c9"
-uuid = "09ab397b-f2b6-538f-b94a-2f83cf4a842a"
-version = "0.7.0"
-weakdeps = ["Adapt", "GPUArraysCore", "KernelAbstractions", "LinearAlgebra", "SparseArrays", "StaticArrays"]
-
-    [deps.StructArrays.extensions]
-    StructArraysAdaptExt = "Adapt"
-    StructArraysGPUArraysCoreExt = ["GPUArraysCore", "KernelAbstractions"]
-    StructArraysLinearAlgebraExt = "LinearAlgebra"
-    StructArraysSparseArraysExt = "SparseArrays"
-    StructArraysStaticArraysExt = "StaticArrays"
+[[deps.StringManipulation]]
+deps = ["PrecompileTools"]
+git-tree-sha1 = "725421ae8e530ec29bcbdddbe91ff8053421d023"
+uuid = "892a3eda-7b42-436c-8928-eab12a02cf0e"
+version = "0.4.1"
 
 [[deps.StructTypes]]
 deps = ["Dates", "UUIDs"]
@@ -4049,15 +3515,6 @@ git-tree-sha1 = "25008b734a03736c41e2a7dc314ecb95bd6bbdb0"
 uuid = "a7c27f48-0311-42f6-a7f8-2c11e75eb415"
 version = "0.1.6"
 
-[[deps.UnsafeAtomics]]
-git-tree-sha1 = "b13c4edda90890e5b04ba24e20a310fbe6f249ff"
-uuid = "013be700-e6cd-48c3-b4a1-df204f14c38f"
-version = "0.3.0"
-weakdeps = ["LLVM"]
-
-    [deps.UnsafeAtomics.extensions]
-    UnsafeAtomicsLLVM = ["LLVM"]
-
 [[deps.Unzip]]
 git-tree-sha1 = "ca0969166a028236229f63514992fc073799bb78"
 uuid = "41fe7b60-77ed-43a1-b4f0-825fd5a5650d"
@@ -4081,10 +3538,21 @@ git-tree-sha1 = "5db3e9d307d32baba7067b13fc7b5aa6edd4a19a"
 uuid = "2381bf8a-dfd0-557d-9999-79630e7b1b91"
 version = "1.36.0+0"
 
+[[deps.WeakRefStrings]]
+deps = ["DataAPI", "InlineStrings", "Parsers"]
+git-tree-sha1 = "b1be2855ed9ed8eac54e5caff2afcdb442d52c23"
+uuid = "ea10d353-3f73-51f8-a26c-33c1cb351aa5"
+version = "1.4.2"
+
 [[deps.WeakValueDicts]]
 git-tree-sha1 = "98528c2610a5479f091d470967a25becfd83edd0"
 uuid = "897b6980-f191-5a31-bcb0-bf3c4585e0c1"
 version = "0.1.0"
+
+[[deps.WorkerUtilities]]
+git-tree-sha1 = "cd1659ba0d57b71a464a29e64dbc67cfe83d54e7"
+uuid = "76eceee3-57b5-4d4a-8e66-0e911cebbf60"
+version = "1.6.1"
 
 [[deps.XML2_jll]]
 deps = ["Artifacts", "JLLWrappers", "Libdl", "Libiconv_jll", "Zlib_jll"]
@@ -4265,28 +3733,6 @@ git-tree-sha1 = "446b23e73536f84e8037f5dce465e92275f6a308"
 uuid = "3161d3a3-bdf6-5164-811a-617609db77b4"
 version = "1.5.7+1"
 
-[[deps.Zygote]]
-deps = ["AbstractFFTs", "ChainRules", "ChainRulesCore", "DiffRules", "Distributed", "FillArrays", "ForwardDiff", "GPUArrays", "GPUArraysCore", "IRTools", "InteractiveUtils", "LinearAlgebra", "LogExpFunctions", "MacroTools", "NaNMath", "PrecompileTools", "Random", "Requires", "SparseArrays", "SpecialFunctions", "Statistics", "ZygoteRules"]
-git-tree-sha1 = "0b3c944f5d2d8b466c5d20a84c229c17c528f49e"
-uuid = "e88e6eb3-aa80-5325-afca-941959d7151f"
-version = "0.6.75"
-
-    [deps.Zygote.extensions]
-    ZygoteColorsExt = "Colors"
-    ZygoteDistancesExt = "Distances"
-    ZygoteTrackerExt = "Tracker"
-
-    [deps.Zygote.weakdeps]
-    Colors = "5ae59095-9a9b-59fe-a467-6f913c188581"
-    Distances = "b4f34e82-e78d-54a5-968a-f98e89d6e8f7"
-    Tracker = "9f7883ad-71c0-57eb-9f7f-b5c9e6d3789c"
-
-[[deps.ZygoteRules]]
-deps = ["ChainRulesCore", "MacroTools"]
-git-tree-sha1 = "434b3de333c75fc446aa0d19fc394edafd07ab08"
-uuid = "700de1a5-db45-46bc-99cf-38207098b444"
-version = "0.2.7"
-
 [[deps.eudev_jll]]
 deps = ["Artifacts", "JLLWrappers", "Libdl", "Pkg", "gperf_jll"]
 git-tree-sha1 = "431b678a28ebb559d224c0b6b6d01afce87c51ba"
@@ -4400,75 +3846,33 @@ version = "1.4.1+2"
 """
 
 # ╔═╡ Cell order:
-# ╠═e388a8a4-fa78-11ef-2081-313d76addb66
-# ╠═46dd04c1-3c53-4d24-a061-39e9fc7bb713
-# ╟─4e7810e7-a1f7-4500-9f7d-9f5aea6ae69e
-# ╟─b0be28d0-c53d-4f74-9b3a-951d05d1a016
-# ╟─f53cd2d2-b08e-4017-8c14-05bb949ddee2
-# ╟─f7b38a1d-da6f-41c0-bff3-48ec8aa2940c
-# ╠═dfe3e0c7-c65e-47c9-8362-37e0ce3d555d
-# ╟─e9399db5-cd3e-4d15-9b39-e81c121c475d
-# ╠═b5e6dc4c-58b5-4f93-88fd-5faf47eac6dc
-# ╠═dfe481fd-f10e-4458-bfcb-d6b32f025f79
-# ╟─0ab716c2-0c36-44ec-8aa7-60b275a936b8
-# ╟─33557962-738e-4b59-b671-bef07aa3f6e0
-# ╠═6d482735-8577-4d36-b549-7a65244198a2
-# ╠═612b73c0-d30a-4f13-843f-977ddf80c244
-# ╠═01a35b96-74cf-4b2c-8835-e62e5bc102bb
-# ╟─cc487ee9-601e-4991-961e-fb5cc347182b
-# ╟─24df4924-bf5c-4ffe-8b27-19f0f67115fa
-# ╠═435ce43a-d531-48e1-a465-dd8a0844a2cf
-# ╠═73bb6329-063d-47f0-bcbc-8c0d1f8a1631
-# ╟─0592a253-a759-4ea6-ae1b-1aba8a0725ce
-# ╟─a1d7ece9-0e6d-40be-82f9-a06a2cecbd0b
-# ╟─0fdbe7aa-6006-4543-a273-3fb2027df420
-# ╟─6381946b-49fd-4541-aaab-5e58915aa984
-# ╠═bdc2bde2-917f-4ec2-9043-8b40d68377ac
-# ╠═f8a80a32-7d76-4cbb-b317-275efceba2f5
-# ╠═33783c65-92f4-428a-a619-5f2c701c0e23
-# ╠═a2a5a2da-5a06-4d03-899b-2d50676ecad5
-# ╠═25856686-763d-484a-8fc6-3575984e2b84
-# ╠═e5853062-bf57-43c7-b242-1f21fddf4000
-# ╟─19745ff7-e06a-4add-9e2c-05945d2920e3
-# ╟─0a9f5275-0edb-408c-b082-2e41102b6341
-# ╟─78a81278-1f3f-4649-aea0-154bd5430eba
-# ╟─59a8e39e-0c9f-4d0c-97c0-8143874cd803
-# ╟─ccc17689-d95c-419a-b251-ef4bc5a84e4b
-# ╠═62a00bef-7011-492c-8437-60b6c402d0b5
-# ╠═f731520a-7e50-4949-a67c-d7094dacaa2f
-# ╠═293b0b45-1e62-492b-be49-2fa77e847a81
-# ╠═252d6270-7e58-47f3-acef-f340e74e187f
-# ╠═89f46bbd-d9df-4a79-9194-669bdcf3e358
-# ╠═e9751b4b-e60d-4764-adee-7e5b7d69b82e
-# ╟─b02ec8d6-4aaa-42f3-b04f-46ff6ca338bb
-# ╟─90ff1dc8-6211-4809-ae0c-6d5c51aeae64
-# ╠═59a251e0-8844-41bb-a794-d052b5764f73
-# ╠═dddb5bc8-29b8-4146-89b4-947b1a75139a
-# ╠═33fb0b07-090b-4350-b97e-5ffca58bb5f7
-# ╠═d5a7e732-8d0a-483c-b3c0-bfbbb08398e1
-# ╠═1adfd059-0d85-4752-a0ad-f82cf8482391
-# ╠═2b0a931d-5a40-44bb-a24a-8de446b91159
-# ╠═2fea13ea-5b99-420a-b860-05de5646de5e
-# ╟─b21e1363-eed9-4b68-9f76-30b565105fe6
-# ╠═89ae2a51-4ae6-4eb5-afa6-c6ab047f8297
-# ╠═76894710-56b3-41e9-a918-5dc754007739
-# ╠═216c2afe-1524-4678-9827-2cf92faa362a
-# ╠═30dfe211-bd09-42e4-a9f1-2bcb4dffb0c9
-# ╠═caa472a8-5c0a-40c2-aea3-b9db1896f71b
-# ╠═e9702fca-1a93-4ca8-9c8a-51374cf9cf88
-# ╠═0be4b97f-f650-4252-92a9-babfa56891b4
-# ╠═527799b7-7e50-4483-8b1e-c0d861b2946f
-# ╠═a1dbfa99-cbb8-4454-8a56-6631fa1a2227
-# ╠═5beae2d2-ff34-43ca-8bd6-dc91cb826b8e
-# ╠═0e24cd3e-f28a-472b-bada-b34a2e43fa27
-# ╠═306aac02-1edd-427b-b9fe-a7c8eea1a0ef
-# ╠═b6b378ce-3326-42c4-943e-355fbc52a1a4
-# ╠═50b72c53-41e9-4cce-93fb-3e1e85d18169
-# ╠═9a28e225-ee6b-4b9e-928d-d2d8f9af6ecb
-# ╟─d44bc887-f755-40ff-bf18-5cfd07259fe3
-# ╟─9f972bc2-4405-4abd-af23-2669855c1e2b
-# ╠═406dc427-e8eb-46a4-b9b8-0c80a42d0870
-# ╠═d5ebc801-d2b7-4a85-83d2-003978eb236b
-# ╠═f5fb7b69-2c6e-48c7-8aaf-4bc296bb925e
+# ╠═a53ef4d8-01e7-11f0-3fb3-f38919f92b8b
+# ╠═12efc307-05d8-49db-8959-6437116307f2
+# ╠═1e025206-dbf6-4129-84b1-df39cd68f8d4
+# ╟─db456303-d536-440d-a21f-dd7816cd3ac6
+# ╠═d71aca70-35c9-4aed-80fd-1787d9525abe
+# ╠═a5b442f6-b412-41c0-8434-fe306e82df4e
+# ╠═c702fdeb-11ae-47f7-bad4-cbabfa0ac7ae
+# ╠═357ec94e-46e3-4ddb-94f2-5a65c1f7aca5
+# ╠═95038aec-1c4f-4605-9307-197d79bee8fe
+# ╠═7abd8820-c603-4641-b1b9-9a5d8f1fdb81
+# ╠═4ac66a2b-3ade-4fca-91a5-b3db1f1e5064
+# ╠═47b3d994-1c45-49b6-b63e-a7ff6d971a75
+# ╠═5472b058-00b6-4747-8a59-22dd6faadca9
+# ╠═14672ce8-da5b-455f-8b8f-b6dca0251737
+# ╟─040a6d1a-0404-4e7a-9cb4-b2c661e6b186
+# ╠═05468bc8-490b-4e4b-afb2-98b584f182f7
+# ╠═77353104-809c-4698-92cd-21007bd09d1e
+# ╟─43b04676-784f-4425-b7d2-a1f3835a1759
+# ╠═89f0015f-fb69-4dac-8a31-501ff494635f
+# ╟─9d2e2652-c17c-408f-9694-dac65e0fcadc
+# ╟─8e69f1ea-a8e1-4a96-867f-d9e5719d8d5a
+# ╟─e60ded04-a672-4055-bf84-f84c946889b6
+# ╟─434aac93-af76-4ffe-818e-baa7063007fd
+# ╟─b4540522-7167-4f8a-8b01-cc5255dc80d9
+# ╠═d0281b9e-3c7c-4a15-8e65-0cf8da43d2ce
+# ╠═55c53f02-af63-485a-8d43-b8fb8ef235a8
+# ╠═22b1cee0-2ec5-4307-8e90-c240683bae53
+# ╠═df0f80bb-2184-4f47-a58a-e6ef05523ff7
 # ╟─00000000-0000-0000-0000-000000000001
 # ╟─00000000-0000-0000-0000-000000000002
