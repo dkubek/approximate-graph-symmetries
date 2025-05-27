@@ -1,15 +1,13 @@
-import numpy as np
 import time
-from typing import Union, Literal, Optional
-from AGS.initialization import (
-    check_random_state,
-    init_barycenter,
-    init_random_doubly_stochastic,
-    init_random_permutation,
-)
-from scipy.optimize import linear_sum_assignment
+from typing import Literal, Optional, Union
 
+import numpy as np
+from scipy.optimize import linear_sum_assignment
 from tqdm import tqdm
+
+from AGS.initialization import (check_random_state, init_barycenter,
+                                init_random_doubly_stochastic,
+                                init_random_permutation)
 
 
 class QSA:

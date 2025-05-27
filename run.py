@@ -4,37 +4,40 @@ Graph Optimization Runner
 Processes graph instances using various optimization methods with parallel execution.
 """
 
-import os
-import sys
 import argparse
 import logging
+import os
+import sys
 import time
-import warnings
-from pathlib import Path
-from dataclasses import dataclass, field, asdict
-from typing import Dict, List, Optional, Tuple, Any, Callable
-from multiprocessing import Pool, cpu_count
 import traceback
+import warnings
+from dataclasses import asdict, dataclass, field
+from multiprocessing import Pool, cpu_count
+from pathlib import Path
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import numpy as np
 import torch
 import yaml
-from tqdm import tqdm
 from scipy.optimize import linear_sum_assignment
+from tqdm import tqdm
 
 # Import optimization methods
-from AGS.methods import InteriorPoint, Manifold, OT4P4AS, QSA, SoftSort
+from AGS.methods import OT4P4AS, QSA, InteriorPoint, Manifold, SoftSort
 
 # Suppress warnings
 warnings.filterwarnings("ignore")
 
 
+# ============================================================================
+# Configuration Classes
+# ============================================================================
 @dataclass
 class BaseConfig:
     """Base configuration for all methods."""
 
     max_iter: int = 500
-    verbose: int = 0  # Always 0 to avoid interfering with progress bars
+    verbose: int = 2  # Always 0 to avoid interfering with progress bars
 
 
 @dataclass
@@ -51,7 +54,7 @@ class ManifoldConfig(BaseConfig):
 
     optimizer: str = "steepest_descent"
     max_iter: int = 500
-    #optimizer_kwargs: Dict[str, Any] = field(default_factory=dict)
+    # optimizer_kwargs: Dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -150,83 +153,74 @@ def process_single_run(
     return permutation, P_doubly_stochastic, execution_time
 
 
-def process_instance(
-    args: Tuple[str, str, Path, Config, int],
+def process_simulation(
+    args: Tuple[str, str, Path, int, Config, bool],
 ) -> Optional[Dict[str, Any]]:
     """
-    Process a single instance (with all its simulations).
+    Process a single simulation.
 
     Args:
-        args: Tuple of (method_name, graph_type, instance_file, config, worker_id)
+        args: Tuple of (method_name, graph_type, instance_file, sim_idx, config, force_recompute)
 
     Returns:
-        Dictionary with results or None if failed
+        Dictionary with results or None if failed/skipped
     """
-    method_name, graph_type, instance_file, config, worker_id = args
+    method_name, graph_type, instance_file, sim_idx, config, force_recompute = args
 
     try:
+        instance_id_base = instance_file.stem
+        instance_id = f"{instance_id_base}_sim{sim_idx}"
+
+        # Check if already processed
+        results_path = Path("results") / method_name / graph_type
+        perm_file = results_path / "Permutations" / f"{instance_id}.csv"
+
+        if perm_file.exists() and not force_recompute:
+            return None  # Skip already processed
+
         # Load data
         data = np.load(instance_file)
-        instance_id_base = instance_file.stem
+
+        # Get adjacency matrix
+        A = data[str(sim_idx)].astype(np.float64)
 
         # Create method instance
         method = create_method_instance(method_name, config)
 
-        # Results storage
-        all_results = {}
+        # Run multiple times
+        permutations = []
+        matrices = []
+        times = []
 
-        # Process each simulation
-        for sim_idx in range(39):  # 0 to 38
-            instance_id = f"{instance_id_base}_sim{sim_idx}"
-
-            # Check if already processed
-            results_path = Path("results") / method_name / graph_type
-            perm_file = results_path / "Permutations" / f"{instance_id}.csv"
-
-            if perm_file.exists():
-                continue
-
-            # Get adjacency matrix
-            A = data[str(sim_idx)].astype(np.float64)
-
-            # Run multiple times
-            permutations = []
-            matrices = []
-            times = []
-
-            for run_idx in range(config.num_runs):
-                perm, P_mat, exec_time = process_single_run(A, method, config.c)
-                permutations.append(perm)
-                matrices.append(P_mat)
-                times.append(exec_time)
-
-            all_results[instance_id] = {
-                "permutations": np.column_stack(permutations),
-                "matrices": matrices,
-                "times": times,
-            }
+        for run_idx in range(config.num_runs):
+            perm, P_mat, exec_time = process_single_run(A, method, config.c)
+            permutations.append(perm)
+            matrices.append(P_mat)
+            times.append(exec_time)
 
         return {
             "method": method_name,
             "graph_type": graph_type,
-            "instance_base": instance_id_base,
-            "results": all_results,
+            "instance_id": instance_id,
+            "permutations": np.column_stack(permutations),
+            "matrices": matrices,
+            "times": times,
         }
 
     except Exception as e:
-        logging.error(f"Failed to process {instance_file}: {str(e)}")
+        logging.error(f"Failed to process {instance_file.stem}_sim{sim_idx}: {str(e)}")
         logging.debug(traceback.format_exc())
-        raise e
-        return None
+        return False
 
 
-def save_results(result_data: Dict[str, Any]) -> None:
-    """Save results to appropriate files."""
+def save_single_result(result_data: Dict[str, Any]) -> None:
+    """Save a single simulation result immediately."""
     if not result_data:
         return
 
     method_name = result_data["method"]
     graph_type = result_data["graph_type"]
+    instance_id = result_data["instance_id"]
 
     # Create directories
     base_path = Path("results") / method_name / graph_type
@@ -234,28 +228,44 @@ def save_results(result_data: Dict[str, Any]) -> None:
     (base_path / "RawOutputs").mkdir(parents=True, exist_ok=True)
     (base_path / "Times").mkdir(parents=True, exist_ok=True)
 
-    # Save each instance
-    for instance_id, data in result_data["results"].items():
-        # Save permutations
-        perm_file = base_path / "Permutations" / f"{instance_id}.csv"
-        np.savetxt(perm_file, data["permutations"], delimiter=",", fmt="%d")
+    # Save permutations
+    perm_file = base_path / "Permutations" / f"{instance_id}.csv"
+    np.savetxt(perm_file, result_data["permutations"], delimiter=",", fmt="%d")
 
-        # Save raw matrices
-        raw_file = base_path / "RawOutputs" / f"{instance_id}.npz"
-        matrix_dict = {f"P_{i}": mat for i, mat in enumerate(data["matrices"])}
-        np.savez(raw_file, **matrix_dict)
+    # Save raw matrices
+    raw_file = base_path / "RawOutputs" / f"{instance_id}.npz"
+    matrix_dict = {f"P_{i}": mat for i, mat in enumerate(result_data["matrices"])}
+    np.savez(raw_file, **matrix_dict)
 
-        # Save times
-        times_file = base_path / "Times" / f"{instance_id}.csv"
-        np.savetxt(times_file, data["times"], delimiter=",", fmt="%.6f")
+    # Save times
+    times_file = base_path / "Times" / f"{instance_id}.csv"
+    np.savetxt(times_file, result_data["times"], delimiter=",", fmt="%.6f")
 
 
 # ============================================================================
 # Main Orchestration
 # ============================================================================
-def collect_instances(data_path: Path) -> list[tuple[str, Path]]:
-    """Collect all instance files from data directory."""
-    instances = []
+def collect_work_items(
+    data_path: Path,
+    instance_filter: Optional[List[str]] = None,
+    simulation_filter: Optional[List[int]] = None,
+) -> List[Tuple[str, Path, int]]:
+    """
+    Collect all work items (instance, simulation pairs) from data directory.
+
+    Args:
+        data_path: Path to data directory
+        instance_filter: List of instance base names to process (None = all)
+        simulation_filter: List of simulation indices to process (None = all)
+
+    Returns:
+        List of (graph_type, instance_file, sim_idx) tuples
+    """
+    work_items = []
+    all_simulations = list(range(39))  # 0 to 38
+
+    # Determine which simulations to process
+    simulations_to_process = simulation_filter if simulation_filter else all_simulations
 
     for graph_type in os.listdir(data_path):
         graph_dir = data_path / graph_type
@@ -269,56 +279,105 @@ def collect_instances(data_path: Path) -> list[tuple[str, Path]]:
                 and filepath.suffix == ".npz"
                 and "allInfo" not in filename
             ):
-                instances.append((graph_type, filepath))
 
-    return sorted(instances)
+                instance_base = filepath.stem
+
+                # Check instance filter
+                if instance_filter and instance_base not in instance_filter:
+                    continue
+
+                # Add work items for each simulation
+                for sim_idx in simulations_to_process:
+                    work_items.append((graph_type, filepath, sim_idx))
+
+    return sorted(work_items)
 
 
 def run_optimization(
-    methods: list[str], data_path: Path, config: Config, dry_run: bool = False
+    methods: List[str],
+    data_path: Path,
+    config: Config,
+    instance_filter: Optional[List[str]] = None,
+    simulation_filter: Optional[List[int]] = None,
+    force_recompute: bool = False,
+    dry_run: bool = False,
 ) -> None:
     """Run optimization for specified methods."""
 
-    # Collect all instances
-    instances = collect_instances(data_path)
+    # Collect all work items
+    work_items = collect_work_items(data_path, instance_filter, simulation_filter)
 
-    if not instances:
-        print("No instances found!")
+    if not work_items:
+        print("No work items found!")
         return
 
-    # Create work items
-    work_items = []
+    # Create full work items with method
+    full_work_items = []
     for method_name in methods:
-        for graph_type, instance_file in instances:
-            work_items.append((method_name, graph_type, instance_file, config))
+        for graph_type, instance_file, sim_idx in work_items:
+            full_work_items.append(
+                (
+                    method_name,
+                    graph_type,
+                    instance_file,
+                    sim_idx,
+                    config,
+                    force_recompute,
+                )
+            )
 
-    total_items = len(work_items)
-    print(f"\nFound {len(instances)} instance files")
+    total_items = len(full_work_items)
+
+    # Count unique instances and simulations
+    unique_instances = len(set((item[1], item[2]) for item in work_items))
+    # unique_simulations = len(set(item[3] for item in work_items))
+
+    print(f"\nFound {unique_instances} instance files")
+    # print(f"Processing {unique_simulations} simulation(s) per instance")
     print(f"Running {len(methods)} method(s): {', '.join(methods)}")
     print(f"Total work items: {total_items}")
+    print(f"Force recompute: {'Yes' if force_recompute else 'No'}")
 
     if dry_run:
         print("\nDry run - no processing will be performed.")
+        print("\nSample work items:")
+        for item in full_work_items[:10]:
+            print(f"  {item[0]} - {item[2].stem}_sim{item[3]}")
+        if len(full_work_items) > 10:
+            print(f"  ... and {len(full_work_items) - 10} more")
         return
 
     # Process with multiprocessing
-    num_workers = config.num_workers or cpu_count()
+    #num_workers = config.num_workers or cpu_count()
+    num_workers = 1
     print(f"Using {num_workers} workers")
 
-    # Add worker IDs to work items
-    work_items_with_id = [
-        (w[0], w[1], w[2], w[3], i % num_workers) for i, w in enumerate(work_items)
-    ]
+    # Process and save immediately
+    processed = 0
+    skipped = 0
+    failed = 0
 
-    # Create progress bar
-    with Pool(num_workers) as pool:
-        with tqdm(total=total_items, desc="Processing instances") as pbar:
-            for result in pool.imap_unordered(process_instance, work_items_with_id):
-                if result:
-                    save_results(result)
-                pbar.update(1)
+    # with Pool(num_workers) as pool:
+    #    with tqdm(total=total_items, desc="Processing simulations") as pbar:
+    #        for result in pool.imap_unordered(process_simulation, full_work_items):
 
-    print("\nProcessing complete!")
+    with tqdm(total=total_items, desc="Processing simulations") as pbar:
+        for work_item in full_work_items:
+            result = process_simulation(work_item)
+            if result:
+                save_single_result(result)
+                processed += 1
+            elif result is None:
+                skipped += 1
+            else:
+                failed += 1
+            pbar.update(1)
+            pbar.set_postfix(processed=processed, skipped=skipped, failed=failed)
+
+    print(f"\nProcessing complete!")
+    print(f"  Processed: {processed}")
+    print(f"  Skipped (already exist): {skipped}")
+    print(f"  Failed: {failed}")
 
 
 # ============================================================================
@@ -353,6 +412,25 @@ def load_config(config_file: Optional[Path]) -> Config:
 # ============================================================================
 # CLI Interface
 # ============================================================================
+def parse_simulation_indices(sim_str: str) -> List[int]:
+    """
+    Parse simulation indices from string.
+    Examples: "0,1,2" or "0-5" or "0-5,10,15-20"
+    """
+    simulations = []
+    parts = sim_str.split(",")
+
+    for part in parts:
+        if "-" in part:
+            start, end = map(int, part.split("-"))
+            simulations.extend(range(start, end + 1))
+        else:
+            simulations.append(int(part))
+
+    # Filter valid simulation indices (0-38)
+    return [s for s in simulations if 0 <= s <= 38]
+
+
 def main():
     """Main entry point."""
     parser = argparse.ArgumentParser(
@@ -383,6 +461,18 @@ def main():
         help="Methods to run (default: all)",
     )
 
+    # Instance and simulation selection
+    parser.add_argument(
+        "--instances",
+        nargs="+",
+        help="Specific instance base names to process (e.g., instance1 instance2)",
+    )
+    parser.add_argument(
+        "--simulations",
+        type=str,
+        help="Simulation indices to process (e.g., '0,1,2' or '0-5' or '0-5,10,15-20')",
+    )
+
     # Configuration
     parser.add_argument("--config", type=Path, help="Path to YAML configuration file")
     parser.add_argument(
@@ -399,7 +489,12 @@ def main():
         help="Number of parallel workers (default: number of CPU cores)",
     )
 
-    # Other options
+    # Processing options
+    parser.add_argument(
+        "--force-recompute",
+        action="store_true",
+        help="Force recomputation of existing results",
+    )
     parser.add_argument(
         "--dry-run",
         action="store_true",
@@ -410,7 +505,7 @@ def main():
     args = parser.parse_args()
 
     # Setup logging
-    log_level = logging.INFO
+    log_level = logging.DEBUG
     log_format = "%(asctime)s - %(levelname)s - %(message)s"
 
     if args.log_file:
@@ -439,6 +534,12 @@ def main():
     else:
         methods = args.methods
 
+    # Parse simulation indices
+    simulation_filter = None
+    if args.simulations:
+        simulation_filter = parse_simulation_indices(args.simulations)
+        print(f"Processing simulations: {sorted(simulation_filter)}")
+
     # Print configuration
     print("\nConfiguration:")
     print(f"  Penalty parameter (c): {config.c}")
@@ -446,7 +547,15 @@ def main():
     print(f"  Number of workers: {config.num_workers or 'auto'}")
 
     # Run optimization
-    run_optimization(methods, args.data_path, config, args.dry_run)
+    run_optimization(
+        methods,
+        args.data_path,
+        config,
+        instance_filter=args.instances,
+        simulation_filter=simulation_filter,
+        force_recompute=args.force_recompute,
+        dry_run=args.dry_run,
+    )
 
 
 if __name__ == "__main__":

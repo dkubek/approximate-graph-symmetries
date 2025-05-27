@@ -1,6 +1,7 @@
-from .utils import matching, matrix_power, generate_random_orthogonal_matrix
 import torch
 import torch.nn as nn
+
+from .utils import generate_random_orthogonal_matrix, matching, matrix_power
 
 
 class OT4P(nn.Module):

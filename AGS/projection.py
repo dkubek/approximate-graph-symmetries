@@ -1,6 +1,7 @@
+from typing import Iterator, Optional
+
 import numpy as np
 from scipy.optimize import linear_sum_assignment
-from typing import Optional, Iterator, Optional
 
 
 def sinkhorn(

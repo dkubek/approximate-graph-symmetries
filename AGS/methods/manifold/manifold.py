@@ -1,12 +1,13 @@
 import time
-import numpy as np
-import torch
-import pymanopt
-from pymanopt import Problem
-from pymanopt.optimizers import SteepestDescent, TrustRegions, ConjugateGradient
-
-
 from typing import Optional
+
+import numpy as np
+import pymanopt
+import torch
+from pymanopt import Problem
+from pymanopt.optimizers import (ConjugateGradient, SteepestDescent,
+                                 TrustRegions)
+
 from AGS.methods.manifold.doublystochastic import DoublyStochastic
 
 

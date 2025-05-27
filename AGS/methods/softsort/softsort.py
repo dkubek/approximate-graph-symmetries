@@ -1,7 +1,9 @@
 from time import time
+
 import numpy as np
 import torch
 from tqdm import tqdm
+
 from AGS.annealing import get_annealing_tau
 
 

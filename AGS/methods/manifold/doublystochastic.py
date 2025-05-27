@@ -1,7 +1,7 @@
-import numpy as np
-import scipy.sparse.linalg
 from typing import Optional, Tuple
 
+import numpy as np
+import scipy.sparse.linalg
 from pymanopt.manifolds.manifold import Manifold
 
 
@@ -174,21 +174,21 @@ class DoublyStochastic(Manifold):
 
     def _linear_solve(self, point, b):
         n = self._n
-        
+
         # Split b into components
-        Z1 = b[:n]  # sum(Z, axis=1) 
+        Z1 = b[:n]  # sum(Z, axis=1)
         ZT1 = b[n:]  # sum(Z, axis=0)
-        
+
         # Compute (I - XX^T)
         I_minus_XXT = np.eye(n) - point @ point.T
-        
+
         # Compute alpha using pseudo-inverse
         # alpha = (I - XX^T)^† (Z1 - X*Z^T*1)
         alpha = np.linalg.pinv(I_minus_XXT) @ (Z1 - point @ ZT1)
-        
+
         # Compute beta
         beta = ZT1 - point.T @ alpha
-        
+
         return alpha, beta
 
     def _doubly_stochastic(self, X, tol=1e-8):

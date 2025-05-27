@@ -1,7 +1,8 @@
+from typing import Optional
+
 import numpy as np
 import torch
 from torch_linear_assignment import batch_linear_assignment
-from typing import Optional
 
 
 def matrix_power(matrix: torch.Tensor, s: float) -> torch.Tensor:
