@@ -43,6 +43,8 @@ class InteriorPoint:
 
         self.verbose = verbose
 
+        self._iteration_count = 0
+
     def _setup_sparsity_patterns(self):
         """Pre-compute sparsity patterns for Jacobian."""
 
@@ -119,6 +121,13 @@ class InteriorPoint:
         """Return sparsity structure of Jacobian."""
         return (self.jac_rows, self.jac_cols)
 
+    def intermediate(
+        self, alg_mod, iter_count, obj_value, inf_pr, inf_du, mu,
+        d_norm, regularization_size, alpha_du, alpha_pr, ls_trials
+    ):
+        """IPOPT callback to track iterations."""
+        self._iteration_count = iter_count
+
     def solve(
         self,
         A,
@@ -171,6 +180,9 @@ class InteriorPoint:
 
         # Pre-compute sparsity patterns
         self._setup_sparsity_patterns()
+
+        # Reset iteration counter
+        self._iteration_count = 0
 
         # Initialize P
         if P0 is not None and isinstance(P0, np.ndarray):
@@ -232,4 +244,10 @@ class InteriorPoint:
         # Reshape to matrix form
         P_opt = x_opt.reshape((n, n))
 
-        return {"P": P_opt, "time": end_time - start_time}
+        return {
+            "P": P_opt, 
+            "metrics": {
+                "time": end_time - start_time,
+                "iterations": self._iteration_count
+            }
+        }

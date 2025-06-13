@@ -280,18 +280,19 @@ def create_method_instance(method_name: str, config: Config) -> Any:
 # ============================================================================
 def process_single_run(
     A: np.ndarray, method: Any, c: float
-) -> Tuple[np.ndarray, np.ndarray, float]:
+) -> Tuple[np.ndarray, np.ndarray, Dict[str, Any]]:
     """
     Process a single optimization run.
 
     Returns:
         permutation: Best permutation (n,)
         P_doubly_stochastic: Doubly stochastic matrix (n, n)
-        time: Execution time
+        time: Execution time (deprecated, use metrics['time'])
+        metrics: Dictionary of metrics from this run
     """
     result = method.solve(A, c)
     P_doubly_stochastic = result["P"]
-    execution_time = result["time"]
+    metrics = result["metrics"]
 
     # Project to permutation using linear assignment
     cost_matrix = -P_doubly_stochastic
@@ -301,7 +302,7 @@ def process_single_run(
     permutation = np.zeros(A.shape[0], dtype=int)
     permutation[row_indices] = col_indices
 
-    return permutation, P_doubly_stochastic, execution_time
+    return permutation, P_doubly_stochastic, metrics
 
 
 def process_simulation(
@@ -345,13 +346,13 @@ def process_simulation(
         # Run multiple times
         permutations = []
         matrices = []
-        times = []
+        all_metrics = []  # Collect metrics from all runs
 
         for run_idx in range(config.num_runs):
-            perm, P_mat, exec_time = process_single_run(A, method, config.c)
+            perm, P_mat, metrics = process_single_run(A, method, config.c)
             permutations.append(perm)
             matrices.append(P_mat)
-            times.append(exec_time)
+            all_metrics.append(metrics)
 
         return {
             "method": method_name,
@@ -362,7 +363,7 @@ def process_simulation(
             "config": config,
             "permutations": np.column_stack(permutations),
             "matrices": matrices,
-            "times": times,
+            "metrics": all_metrics,
         }
 
     except Exception as e:
@@ -388,7 +389,7 @@ def save_single_result(result_data: Dict[str, Any]) -> None:
     graph_path = base_path / graph_type
     (graph_path / "Permutations").mkdir(parents=True, exist_ok=True)
     (graph_path / "RawOutputs").mkdir(parents=True, exist_ok=True)
-    (graph_path / "Times").mkdir(parents=True, exist_ok=True)
+    (graph_path / "Metrics").mkdir(parents=True, exist_ok=True)
 
     # Save config.json if it doesn't exist
     if not (base_path / "config.json").exists():
@@ -403,9 +404,31 @@ def save_single_result(result_data: Dict[str, Any]) -> None:
     matrix_dict = {f"P_{i}": mat for i, mat in enumerate(result_data["matrices"])}
     np.savez(raw_file, **matrix_dict)
 
-    # Save times
-    times_file = graph_path / "Times" / f"{instance_id}.csv"
-    np.savetxt(times_file, result_data["times"], delimiter=",", fmt="%.6f")
+    # Save metrics
+    metrics_file = graph_path / "Metrics" / f"{instance_id}.csv"
+    
+    # Prepare metrics data for CSV
+    metrics_list = result_data["metrics"]
+    
+    # Add run_id to each metric dict
+    for i, metric_dict in enumerate(metrics_list):
+        metric_dict["run_id"] = i
+    
+    # Write metrics to CSV
+    if metrics_list:
+        # Get all unique keys across all runs (for flexible columns)
+        all_keys = set()
+        for m in metrics_list:
+            all_keys.update(m.keys())
+        
+        # Sort keys for consistent column order (run_id first)
+        fieldnames = ["run_id"] + sorted([k for k in all_keys if k != "run_id"])
+        
+        import csv
+        with open(metrics_file, 'w', newline='') as f:
+            writer = csv.DictWriter(f, fieldnames=fieldnames)
+            writer.writeheader()
+            writer.writerows(metrics_list)
 
 
 # ============================================================================

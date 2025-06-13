@@ -138,13 +138,18 @@ class SoftSort:
         # Initialize tracking variables
         best_loss = float("inf")
         best_s = s
+        best_iteration = 0
 
         pbar = tqdm(range(self.max_iter), disable=(self.verbose < 1))
         start_time = time()
-        for i in pbar:
+        iterations_performed = 0
+
+        for iteration in pbar:
+            iterations_performed = iteration + 1
+
             # Compute current tau using the annealing function
             current_tau = get_annealing_tau(
-                i,
+                iteration,
                 self.decay_steps,
                 self.initial_tau,
                 self.final_tau,
@@ -167,6 +172,7 @@ class SoftSort:
             if loss_val < best_loss * (1 - self.min_rel_improvement):
                 best_loss = loss_val
                 best_s = s.clone().detach()
+                best_iteration = iteration + 1
 
             # Update progress bar
             pbar.set_description(f"Loss: {loss_val.item():.6f}, Tau: {current_tau:.4f}")
@@ -178,4 +184,12 @@ class SoftSort:
         end_time = time()
 
         P_opt = soft_sort(best_s, tau=1e-8).cpu().numpy()
-        return {"P": P_opt, "time": end_time - start_time}
+        
+        return {
+            "P": P_opt, 
+            "metrics": {
+                "time": end_time - start_time,
+                "iterations": iterations_performed,
+                "best_iteration": best_iteration
+            }
+        }

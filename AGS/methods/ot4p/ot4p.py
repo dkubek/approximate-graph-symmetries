@@ -120,9 +120,12 @@ class OT4P4AS:
         # Initialize tracking variables
         best_loss = float("inf")
         best_weight = weightP.clone().detach()
+        best_iteration = 0
 
         pbar = tqdm(range(self.max_iter), disable=(self.verbose < 1))
         start_time = time()
+        iterations_performed = 0
+
         for i in pbar:
             current_tau = get_annealing_tau(
                 i,
@@ -149,6 +152,7 @@ class OT4P4AS:
             if loss_val < best_loss * (1 - self.min_rel_improvement):
                 best_loss = loss_val
                 best_weight = weightP.clone().detach()
+                best_iteration = i + 1
 
             # Update model base
             model.update_base(weightP)
@@ -163,4 +167,12 @@ class OT4P4AS:
         end_time = time()
 
         P_opt = model(best_weight, tau=0).cpu().numpy()
-        return {"P": P_opt, "time": end_time - start_time}
+        
+        return {
+            "P": P_opt, 
+            "metrics": {
+                "time": end_time - start_time,
+                "iterations": iterations_performed,
+                "best_iteration": best_iteration
+            }
+        }

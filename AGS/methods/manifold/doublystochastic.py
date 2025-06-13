@@ -70,7 +70,7 @@ class DoublyStochastic(Manifold):
         self,
         n: int,
         *,
-        retraction_method: str = "sinkhorn",
+        retraction_method: str = "simple",
         max_sinkhorn_iters: Optional[int] = None,
         pcg_threshold: int = 100,
     ):

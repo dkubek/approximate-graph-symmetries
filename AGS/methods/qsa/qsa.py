@@ -101,7 +101,11 @@ class QSA:
         # Frank-Wolfe iterations
         pbar = tqdm(range(self.max_iter), disable=(self.verbose < 1))
         start_time = time.time()
+        iterations_performed = 0
+
         for iteration in pbar:
+            iterations_performed = iteration + 1
+
             # Store previous P for convergence check
             P_prev = P.copy()
 
@@ -169,4 +173,10 @@ class QSA:
 
         solve_time = time.time() - start_time
 
-        return {"P": P, "time": solve_time}
+        return {
+            "P": P, 
+            "metrics": {
+                "time": solve_time,
+                "iterations": iterations_performed
+            }
+        }

@@ -73,17 +73,17 @@ class Manifold:
         c = torch.from_numpy(c.astype(float)).to(device=self.device, dtype=self.dtype)
 
         # Create manifold
-        manifold = DoublyStochastic(n, retraction_method="sinkhorn")
+        manifold = DoublyStochastic(n, retraction_method="simple")
 
         # Define cost function
         @pymanopt.function.pytorch(manifold)
         def cost(P):
             """Regularized cost with entropy and annealing."""
             # Original objective
-            # AP = A_torch @ P
-            # APAT = AP @ A_torch.t()
-            # term1 = -torch.sum(APAT * P)
-            term1 = torch.mean(torch.pow(P @ A @ P.t() - A, 2))
+            AP = A @ P
+            APAT = AP @ A.t()
+            term1 = -torch.sum(APAT * P)
+            #term1 = torch.mean(torch.pow(P @ A @ P.t() - A, 2))
             term2 = torch.sum(c * torch.diag(P))
 
             total_cost = term1 + term2
@@ -123,4 +123,10 @@ class Manifold:
         # Convert result back to numpy
         P_opt = result.point
 
-        return {"P": P_opt, "time": end_time - start_time}
+        return {
+            "P": P_opt, 
+            "metrics": {
+                "time": end_time - start_time,
+                "iterations": result.iterations
+            }
+        }
