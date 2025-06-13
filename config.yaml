@@ -1,5 +1,5 @@
 # Global parameters
-c: 0.01 # Penalty parameter
+c: 0.2 # Penalty parameter
 num_runs: 5 # Number of runs per instance
 num_workers: null # Number of parallel workers (null = auto-detect)
 
@@ -14,7 +14,6 @@ Manifold:
   optimizer: "steepest_descent" # Options: "steepest_descent", "trust_regions", "conjugate_gradient"
   max_iter: 500
   verbose: 0
-  #optimizer_kwargs: {}
 
 # OT4P method configuration
 OT4P4AS:

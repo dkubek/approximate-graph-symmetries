@@ -1,8 +1,41 @@
-from typing import Optional, Tuple
+from typing import Optional
 
+import logging
 import numpy as np
+from numba import jit
 import scipy.sparse.linalg
+from scipy.sparse.linalg import cg, LinearOperator
 from pymanopt.manifolds.manifold import Manifold
+
+
+@jit(nopython=True)
+def _doubly_stochastic(X, tol=1e-8, max_iters=100, eps=1e-8):
+    """
+    Sinkhorn-Knopp algorithm to project a matrix onto a Birkhoff polytope.
+    """
+    # Ensure a copy is made if the original array needs to be preserved
+    X_norm = X.copy()
+    X_norm = np.maximum(X_norm, eps)
+
+    for iter_num in range(max_iters):
+        # Row normalization
+        row_sums = np.sum(X_norm, axis=1)
+        row_sums = np.maximum(row_sums, eps)
+        X_norm /= row_sums.reshape(-1, 1)
+
+        # Column normalization
+        col_sums = np.sum(X_norm, axis=0)
+        col_sums = np.maximum(col_sums, eps)
+        X_norm /= col_sums
+
+        # Convergence check
+        col_err = np.max(np.abs(1.0 - col_sums))
+        row_err = np.max(np.abs(1.0 - np.sum(X_norm, axis=1)))
+
+        if max(row_err, col_err) < tol:
+            break
+
+    return np.clip(X_norm, 0, 1)
 
 
 class DoublyStochastic(Manifold):
@@ -43,7 +76,8 @@ class DoublyStochastic(Manifold):
     ):
         self._n = n
         self._retraction_method = retraction_method
-        self._max_sinkhorn_iters = max_sinkhorn_iters or (1000 + 2 * n)
+        self._max_sinkhorn_iters = max_sinkhorn_iters or (100 + 2 * n)
+        self._sinkhorn_tol = 1e-8
         self._pcg_threshold = pcg_threshold
 
         name = f"Doubly stochastic manifold DS({n})"
@@ -134,7 +168,9 @@ class DoublyStochastic(Manifold):
         # Ensure positivity first
         Y = np.maximum(Y, self._eps)
         # Project to doubly stochastic
-        return self._doubly_stochastic(Y)
+        return _doubly_stochastic(
+            Y, self._sinkhorn_tol, self._max_sinkhorn_iters, self._eps
+        )
 
     def _retraction_sinkhorn(self, point, tangent_vector):
         """Exponential-based retraction with Sinkhorn projection."""
@@ -148,14 +184,18 @@ class DoublyStochastic(Manifold):
 
         Y = point * np.exp(ratio)
         # Project to doubly stochastic
-        return self._doubly_stochastic(Y)
+        return _doubly_stochastic(
+            Y, self._sinkhorn_tol, self._max_sinkhorn_iters, self._eps
+        )
 
     def random_point(self):
         """Generate random doubly stochastic matrix."""
         # Start with random positive matrix
         X = np.abs(np.random.randn(self._n, self._n)) + self._eps
         # Project to doubly stochastic
-        return self._doubly_stochastic(X)
+        return _doubly_stochastic(
+            X, self._sinkhorn_tol, self._max_sinkhorn_iters, self._eps
+        )
 
     def random_tangent_vector(self, point):
         """Generate random tangent vector."""
@@ -172,7 +212,7 @@ class DoublyStochastic(Manifold):
         """Transport tangent vector from point_a to point_b."""
         return self.projection(point_b, tangent_vector_a)
 
-    def _linear_solve(self, point, b):
+    def _linear_solve_pinv(self, point, b):
         n = self._n
 
         # Split b into components
@@ -191,31 +231,41 @@ class DoublyStochastic(Manifold):
 
         return alpha, beta
 
-    def _doubly_stochastic(self, X, tol=1e-8):
-        """Project matrix to doubly stochastic using Sinkhorn-Knopp algorithm."""
-        X = np.maximum(X, self._eps)
+    def _linear_solve(self, point, b):
+        return self._linear_solve_cg(point, b)
 
-        for iter_num in range(self._max_sinkhorn_iters):
-            X_old = X.copy()
+    def _linear_solve_cg(self, point, b):
+        n = self._n
 
-            # Row normalization
-            row_sums = np.sum(X, axis=1, keepdims=True)
-            row_sums = np.maximum(row_sums, self._eps)
-            X = X / row_sums
+        # Define the matrix-vector product function for the block system
+        # This function computes A @ x without ever forming A explicitly.
+        def matvec(x):
+            x_top = x[:n]
+            x_bottom = x[n:]
+            Ax_top = x_top + point @ x_bottom
+            Ax_bottom = point.T @ x_top + x_bottom
+            return np.concatenate([Ax_top, Ax_bottom])
 
-            # Column normalization
-            col_sums = np.sum(X, axis=0, keepdims=True)
-            col_sums = np.maximum(col_sums, self._eps)
-            X = X / col_sums
+        # Create a LinearOperator. This is the efficient way to use
+        # SciPy's iterative solvers.
+        A = LinearOperator((2 * n, 2 * n), matvec=matvec)
 
-            # More robust convergence check
-            rel_change = np.max(np.abs(X - X_old)) / (1.0 + np.max(np.abs(X)))
-            if rel_change < tol:
-                break
+        # Use the conjugate gradient solver. It's fast and well-suited for this
+        # symmetric positive-definite system.
+        # 'zeta' will contain both alpha and beta stacked.
+        zeta, info = cg(A, b)  # info=0 on success
 
-        # Final safety check
-        X = np.clip(X, 0, 1)
-        return X
+        if info != 0:
+            # Handle case where the cg solver did not converge
+            # logging.debug(f"Warning: Conjugate Gradient solver did not converge. Info: {info}")
+            # logging.debug(f"Using pseudoinverse to solve the linear system.")
+            return self._linear_solve_pinv(point, b)
+
+        # Split the result back into alpha and beta
+        alpha = zeta[:n]
+        beta = zeta[n:]
+
+        return alpha, beta
 
     def dist(self, point_a, point_b):
         """Geodesic distance between two points."""
@@ -236,4 +286,6 @@ class DoublyStochastic(Manifold):
         """Compute the mean of two points."""
         # Simple approach: normalize the average
         mean = (point_a + point_b) / 2
-        return self._doubly_stochastic(mean)
+        return _doubly_stochastic(
+            mean, self._sinkhorn_tol, self._max_sinkhorn_iters, self._eps
+        )

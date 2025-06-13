@@ -1,12 +1,16 @@
 #!/usr/bin/env python3
 """
-Graph Optimization Runner
-Processes graph instances using various optimization methods with parallel execution.
+Approximate Symmetry Optimization Runner
+
+Processes graph instances using various optimization methods with optional
+parallel execution.
 """
 
 import argparse
+import json
 import logging
 import os
+import re
 import sys
 import time
 import traceback
@@ -28,6 +32,10 @@ from AGS.methods import OT4P4AS, QSA, InteriorPoint, Manifold, SoftSort
 # Suppress warnings
 warnings.filterwarnings("ignore")
 
+# Suppress Numba debug logging
+logging.getLogger("numba").setLevel(logging.WARNING)
+logging.getLogger("numba.core.ssa").setLevel(logging.WARNING)
+
 
 # ============================================================================
 # Configuration Classes
@@ -37,7 +45,7 @@ class BaseConfig:
     """Base configuration for all methods."""
 
     max_iter: int = 500
-    verbose: int = 2  # Always 0 to avoid interfering with progress bars
+    verbose: int = 0  # Always 0 to avoid interfering with progress bars
 
 
 @dataclass
@@ -68,6 +76,7 @@ class OT4PConfig(BaseConfig):
     decay_steps: int = 5000
     learning_rate: float = 0.1
     min_rel_improvement: float = 1e-4
+    verbose: int = 1
 
 
 @dataclass
@@ -104,6 +113,148 @@ class Config:
     OT4P4AS: OT4PConfig = field(default_factory=OT4PConfig)
     QSA: QSAConfig = field(default_factory=QSAConfig)
     SoftSort: SoftSortConfig = field(default_factory=SoftSortConfig)
+
+
+# ============================================================================
+# Parameter Directory Name Generation
+# ============================================================================
+def format_value_for_dirname(value: Any) -> str:
+    """
+    Format a parameter value for use in directory name.
+
+    - Floats: decimal points → '_', scientific notation → 'em'
+    - Strings: spaces → '_', lowercase
+    - Others: string representation
+    """
+    if isinstance(value, float):
+        # Check if scientific notation is more appropriate
+        abs_val = abs(value)
+        if abs_val != 0 and (abs_val < 0.001 or abs_val >= 10000):
+            # Use scientific notation
+            # Format with up to 6 significant figures
+            exp_str = f"{value:.6e}"
+            # Replace 'e-' with 'em' and 'e+' with 'ep'
+            exp_str = exp_str.replace("e-", "em").replace("e+", "ep")
+            # Remove trailing zeros after decimal
+            if "." in exp_str:
+                base, exp = exp_str.split("e" if "e" in exp_str else "E")
+                base = base.rstrip("0").rstrip(".")
+                exp_str = (
+                    base
+                    + ("em" if "em" in exp_str else "ep")
+                    + exp.split("m" if "m" in exp else "p")[1]
+                )
+            return exp_str
+        else:
+            # Regular notation - format with up to 6 significant figures
+            formatted = f"{value:.6g}"
+            # Replace dots with underscores
+            return formatted.replace(".", "_")
+    elif isinstance(value, str):
+        # Replace spaces and other problematic characters
+        return value.lower().replace(" ", "_").replace("-", "_")
+    else:
+        return str(value)
+
+
+def get_important_params(
+    method_name: str, method_config: Any, c: float
+) -> Dict[str, Any]:
+    """
+    Get important parameters for a given method.
+
+    Returns a dictionary of parameter names and values that should be
+    included in the directory name.
+    """
+    # Always include c
+    params = {"c": c}
+
+    # Method-specific important parameters
+    if method_name == "InteriorPoint":
+        params.update(
+            {
+                "max_iter": method_config.max_iter,
+                "tol": method_config.tol,
+            }
+        )
+    elif method_name == "Manifold":
+        params.update(
+            {
+                "optimizer": method_config.optimizer,
+                "max_iter": method_config.max_iter,
+            }
+        )
+    elif method_name == "OT4P4AS":
+        params.update(
+            {
+                "max_iter": method_config.max_iter,
+                "initial_tau": method_config.initial_tau,
+                "final_tau": method_config.final_tau,
+                "learning_rate": method_config.learning_rate,
+            }
+        )
+    elif method_name == "QSA":
+        params.update(
+            {
+                "max_iter": method_config.max_iter,
+                "tol": method_config.tol,
+            }
+        )
+    elif method_name == "SoftSort":
+        params.update(
+            {
+                "max_iter": method_config.max_iter,
+                "initial_tau": method_config.initial_tau,
+                "final_tau": method_config.final_tau,
+                "learning_rate": method_config.learning_rate,
+            }
+        )
+
+    return params
+
+
+def get_param_dirname(method_name: str, method_config: Any, config: Config) -> str:
+    """
+    Generate parameter directory name for a given method and configuration.
+
+    Example: "c0_1_max_iter1000_tol1em8"
+    """
+    # Get important parameters
+    params = get_important_params(method_name, method_config, config.c)
+
+    # Sort parameters alphabetically for consistency
+    sorted_params = sorted(params.items())
+
+    # Format each parameter
+    param_strings = []
+    for param_name, param_value in sorted_params:
+        formatted_value = format_value_for_dirname(param_value)
+        param_strings.append(f"{param_name}{formatted_value}")
+
+    return "_".join(param_strings)
+
+
+def save_config_json(
+    base_path: Path, method_name: str, method_config: Any, config: Config
+) -> None:
+    """
+    Save complete configuration to JSON file.
+
+    Saves all parameters including c, num_runs, and method-specific parameters.
+    """
+    config_path = base_path / "config.json"
+
+    # Build config dictionary
+    config_dict = {
+        "method": method_name,
+        "c": config.c,
+        "num_runs": config.num_runs,
+        "method_config": asdict(method_config),
+    }
+
+    # Save as JSON with proper formatting
+    with open(config_path, "w") as f:
+        json.dump(config_dict, f, indent=2)
 
 
 def create_method_instance(method_name: str, config: Config) -> Any:
@@ -171,8 +322,12 @@ def process_simulation(
         instance_id_base = instance_file.stem
         instance_id = f"{instance_id_base}_sim{sim_idx}"
 
-        # Check if already processed
-        results_path = Path("results") / method_name / graph_type
+        # Get method config and parameter directory name
+        method_config = getattr(config, method_name)
+        param_dirname = get_param_dirname(method_name, method_config, config)
+
+        # Check if already processed with new directory structure
+        results_path = Path("results") / method_name / param_dirname / graph_type
         perm_file = results_path / "Permutations" / f"{instance_id}.csv"
 
         if perm_file.exists() and not force_recompute:
@@ -202,6 +357,9 @@ def process_simulation(
             "method": method_name,
             "graph_type": graph_type,
             "instance_id": instance_id,
+            "param_dirname": param_dirname,
+            "method_config": method_config,
+            "config": config,
             "permutations": np.column_stack(permutations),
             "matrices": matrices,
             "times": times,
@@ -221,24 +379,32 @@ def save_single_result(result_data: Dict[str, Any]) -> None:
     method_name = result_data["method"]
     graph_type = result_data["graph_type"]
     instance_id = result_data["instance_id"]
+    param_dirname = result_data["param_dirname"]
+    method_config = result_data["method_config"]
+    config = result_data["config"]
 
-    # Create directories
-    base_path = Path("results") / method_name / graph_type
-    (base_path / "Permutations").mkdir(parents=True, exist_ok=True)
-    (base_path / "RawOutputs").mkdir(parents=True, exist_ok=True)
-    (base_path / "Times").mkdir(parents=True, exist_ok=True)
+    # Create directories with new structure
+    base_path = Path("results") / method_name / param_dirname
+    graph_path = base_path / graph_type
+    (graph_path / "Permutations").mkdir(parents=True, exist_ok=True)
+    (graph_path / "RawOutputs").mkdir(parents=True, exist_ok=True)
+    (graph_path / "Times").mkdir(parents=True, exist_ok=True)
+
+    # Save config.json if it doesn't exist
+    if not (base_path / "config.json").exists():
+        save_config_json(base_path, method_name, method_config, config)
 
     # Save permutations
-    perm_file = base_path / "Permutations" / f"{instance_id}.csv"
+    perm_file = graph_path / "Permutations" / f"{instance_id}.csv"
     np.savetxt(perm_file, result_data["permutations"], delimiter=",", fmt="%d")
 
     # Save raw matrices
-    raw_file = base_path / "RawOutputs" / f"{instance_id}.npz"
+    raw_file = graph_path / "RawOutputs" / f"{instance_id}.npz"
     matrix_dict = {f"P_{i}": mat for i, mat in enumerate(result_data["matrices"])}
     np.savez(raw_file, **matrix_dict)
 
     # Save times
-    times_file = base_path / "Times" / f"{instance_id}.csv"
+    times_file = graph_path / "Times" / f"{instance_id}.csv"
     np.savetxt(times_file, result_data["times"], delimiter=",", fmt="%.6f")
 
 
@@ -279,7 +445,6 @@ def collect_work_items(
                 and filepath.suffix == ".npz"
                 and "allInfo" not in filename
             ):
-
                 instance_base = filepath.stem
 
                 # Check instance filter
@@ -338,6 +503,13 @@ def run_optimization(
     print(f"Total work items: {total_items}")
     print(f"Force recompute: {'Yes' if force_recompute else 'No'}")
 
+    # Display parameter configurations
+    print("\nParameter configurations:")
+    for method_name in methods:
+        method_config = getattr(config, method_name)
+        param_dirname = get_param_dirname(method_name, method_config, config)
+        print(f"  {method_name}: {param_dirname}")
+
     if dry_run:
         print("\nDry run - no processing will be performed.")
         print("\nSample work items:")
@@ -348,7 +520,7 @@ def run_optimization(
         return
 
     # Process with multiprocessing
-    #num_workers = config.num_workers or cpu_count()
+    # num_workers = config.num_workers or cpu_count()
     num_workers = 1
     print(f"Using {num_workers} workers")
 
@@ -357,9 +529,19 @@ def run_optimization(
     skipped = 0
     failed = 0
 
+    # Disable multiprocessing
     # with Pool(num_workers) as pool:
-    #    with tqdm(total=total_items, desc="Processing simulations") as pbar:
-    #        for result in pool.imap_unordered(process_simulation, full_work_items):
+    #     with tqdm(total=total_items, desc="Processing simulations") as pbar:
+    #         for result in pool.imap_unordered(process_simulation, full_work_items):
+    #             if result:
+    #                 save_single_result(result)
+    #                 processed += 1
+    #             elif result is None:
+    #                 skipped += 1
+    #             else:
+    #                 failed += 1
+    #             pbar.update(1)
+    #             pbar.set_postfix(processed=processed, skipped=skipped, failed=failed)
 
     with tqdm(total=total_items, desc="Processing simulations") as pbar:
         for work_item in full_work_items:

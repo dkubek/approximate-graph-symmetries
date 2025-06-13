@@ -52,6 +52,7 @@ class OT4P4AS:
             else "cpu"
         )
         self.device = self.device if self.device != "mps" else "cpu"
+        #self.device = "cpu"
         if self.verbose:
             print(f"Using {self.device} device")
 

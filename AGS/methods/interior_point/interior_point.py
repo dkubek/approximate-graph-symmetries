@@ -5,9 +5,12 @@ import numpy as np
 import scipy.sparse as sp
 from scipy.sparse import csr_matrix, diags, eye, kron
 
-from AGS.initialization import (check_random_state, init_barycenter,
-                                init_random_doubly_stochastic,
-                                init_random_permutation)
+from AGS.initialization import (
+    check_random_state,
+    init_barycenter,
+    init_random_doubly_stochastic,
+    init_random_permutation,
+)
 
 
 class InteriorPoint:
@@ -219,6 +222,7 @@ class InteriorPoint:
         # Optimize for interior point method
         nlp.add_option("mu_strategy", "adaptive")
         nlp.add_option("mehrotra_algorithm", "yes")
+        nlp.add_option("linear_solver", "ma57")
 
         # Solve
         start_time = time.time()
