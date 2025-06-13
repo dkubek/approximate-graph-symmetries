@@ -5,8 +5,7 @@ import numpy as np
 import pymanopt
 import torch
 from pymanopt import Problem
-from pymanopt.optimizers import (ConjugateGradient, SteepestDescent,
-                                 TrustRegions)
+from pymanopt.optimizers import ConjugateGradient, SteepestDescent, TrustRegions
 
 from AGS.methods.manifold.doublystochastic import DoublyStochastic
 
@@ -78,12 +77,12 @@ class Manifold:
         # Define cost function
         @pymanopt.function.pytorch(manifold)
         def cost(P):
-            """Regularized cost with entropy and annealing."""
             # Original objective
             AP = A @ P
             APAT = AP @ A.t()
             term1 = -torch.sum(APAT * P)
             #term1 = torch.mean(torch.pow(P @ A @ P.t() - A, 2))
+
             term2 = torch.sum(c * torch.diag(P))
 
             total_cost = term1 + term2

@@ -762,6 +762,8 @@ constraints ci (x) ≥ 0, i ∈ I [Nocedal]
 ### Manifold
 [SUBTITLE: Exploiting the geometry of the search space.]
 
+- manifold optimization allows us to only consider the space we are working on, potentially decreasing the problem dimension and leading to faster algorithms
+
 #### Manifold optimization Overview
 
 > Drawing on the provided sources, "Step 0 in optimization" lays out the fundamental definition of an optimization problem before considering any additional structure that might inform algorithmic approaches.
@@ -772,6 +774,29 @@ constraints ci (x) ≥ 0, i ∈ I [Nocedal]
 > .
 > •
 > A function $f: S \rightarrow \mathbb{R}$
+
+> Step 0 in optimization
+> It starts with a set 𝑆𝑆 and a function 𝑓𝑓: 𝑆𝑆 → 𝐑𝐑. We want to compute:
+> min
+> 𝑥𝑥∈𝑆𝑆 𝑓𝑓 𝑥𝑥
+> These bare objects fully specify the problem.
+> Any additional structure on 𝑆𝑆 and 𝑓𝑓 may (and should) be exploited
+> for algorithmic purposes but is not part of the problem.
+> Classical unconstrained optimization
+> The search space is a linear space, e.g., 𝑆𝑆 = 𝐑𝐑𝑛𝑛:
+> min
+> 𝑥𝑥∈𝐑𝐑𝑛𝑛 𝑓𝑓 𝑥𝑥
+> We can choose to turn 𝐑𝐑𝑛𝑛 into a Euclidean space: 𝑢𝑢, 𝑣𝑣 = 𝑢𝑢⊤𝑣𝑣.
+> If 𝑓𝑓 is differentiable, we have a gradient grad𝑓𝑓 and Hessian Hess𝑓𝑓.
+> We can build algorithms with them: gradient descent, Newton’s...
+> This course: optimization on manifolds
+> We target applications where 𝑆𝑆 = ℳ is a smooth manifold:
+> min
+> 𝑥𝑥∈ℳ 𝑓𝑓 𝑥𝑥
+> We can choose to turn ℳ into a Riemannian manifold.
+> If 𝑓𝑓 is differentiable, we have a Riemannian gradient and Hessian.
+> We can build algorithms with them: gradient descent, Newton’s...
+
 > .
 > •
 > The objective is to compute the minimum of $f(x)$ over all $x$ in the set $S$, expressed as $\min_{x \in S} f(x)$
@@ -1190,6 +1215,38 @@ constraints ci (x) ≥ 0, i ∈ I [Nocedal]
     - this is the case in iterative gradient based algorithms where we move move a small distance along a set direction (does not move us far)
 
 - [TODO: Show that this is a good retraction for manifold opt; provide sources]
+
+
+> No, the sources do **not** state that the Birkhoff polytope is embedded in the special orthogonal group. Instead, they present the Birkhoff polytope and the orthogonal group as **two distinct continuous spaces** that have been proposed for relaxing permutation matrices.
+> 
+> Here's a breakdown of what the sources indicate about each:
+> 
+> *   **Birkhoff Polytope ($B_n$)**: This is defined as the set of **doubly stochastic matrices**. A doubly stochastic matrix is a square matrix ($X \in \mathbb{R}^{n \times n}$) where all entries are positive ($X_{ij} > 0$), and each row and each column sums to 1. The dimension of the Birkhoff polytope is $(n-1)^2$.
+> *   **Special Orthogonal Group ($SO(n)$)**: This consists of all $n \times n$ **orthogonal matrices** ($O$) that satisfy $O^T O = OO^T = I$ and have a **determinant of +1**. The special orthogonal group is a differentiable manifold. Its dimension is $n(n-1)/2$.
+> 
+> A key distinction highlighted in the sources is their **representation dimension**:
+> *   The Birkhoff polytope has a dimension of $(n-1)^2$.
+> *   The orthogonal group has a lower dimension of $n(n-1)/2$.
+> 
+> While **permutation matrices** (which are square binary matrices with exactly one 1 in each row and column) are a subset of both doubly stochastic matrices (and thus lie within the Birkhoff polytope) and orthogonal matrices (and thus lie within the special orthogonal group), the Birkhoff polytope and the special orthogonal group are generally distinct sets with different defining properties. One is not embedded within the other.
+
+- Birkhoff polytope and pecial orthogonal groups are different spaces
+
+> No.  In fact, the Birkhoff–von Neumann theorem tells us that every $n\times n$ doubly stochastic matrix is a convex combination of permutation matrices—and apart from those permutation matrices, none of the interior (or “mixed”) doubly stochastic matrices is even orthogonal, let alone special‐orthogonal.
+> 
+> * **Orthogonality** requires $P^T P = I$.  A typical doubly stochastic matrix $D$ (with all entries strictly between 0 and 1) does *not* satisfy $D^T D = I$.
+> * **Special orthogonal** further demands $\det = +1$.  Among the permutation matrices, exactly those corresponding to even permutations lie in $\mathrm{SO}(n)$; the others have determinant $-1$.
+> * Thus
+> 
+>   $$
+>     \{\text{doubly stochastic matrices}\}\;\cap\;\mathrm{SO}(n)
+>     \;=\;\{\text{even permutation matrices}\},
+>   $$
+> 
+>   a finite (zero-dimensional) subset, not the whole Birkhoff polytope.
+> 
+> In particular, the convex hull of those even permutations (the Birkhoff polytope) is *not* contained in $\mathrm{SO}(n)$—only its vertices that happen to be even permutations lie there.
+> As an example consider barycenter, it is a DS matrix but singular
 
 
 ### OP4T
