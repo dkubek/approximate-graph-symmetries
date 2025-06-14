@@ -1,0 +1,80 @@
+\documentclass{article}
+\usepackage{amsmath, amssymb}
+\usepackage[most]{tcolorbox}
+\usepackage{xcolor}
+
+% Method 1: Fixed version with explicit text color
+\newtcolorbox{problembox}[1]{
+    enhanced,
+    colback=white,
+    colframe=black,
+    boxrule=0.5pt,
+    arc=0pt,
+    sharp corners,
+    attach boxed title to top left={xshift=10pt, yshift=-\tcboxedtitleheight/2},
+    boxed title style={
+        colback=white,
+        colframe=white,
+        boxrule=0pt,
+        arc=0pt,
+        sharp corners,
+        fontupper=\color{black}  % Explicitly set text color to black
+    },
+    coltitle=black,  % Also set title color to black
+    fonttitle=\normalfont\color{black},  % Ensure title font is black
+    title={\textsc{#1}},
+    left=5pt,
+    right=5pt,
+    top=8pt,
+    bottom=5pt,
+}
+
+% Method 2: Alternative using halign
+% Define a command for the red boxes around terms
+\newcommand{\redbox}[1]{\colorbox{red!20}{\textsc{#1}}}
+
+% Define commands for properly aligned Input/Find entries
+\newcommand{\problemitem}[2]{%
+    \noindent\hangindent=3.5em\hangafter=1
+    \makebox[3.5em][l]{\emph{#1}:\hspace{0.5em}}#2\par
+}
+
+% Alternative using tabular (more precise control)
+\newcommand{\problemitemtab}[2]{%
+    \noindent\begin{tabular}{@{}p{2.5em}@{}p{\dimexpr\linewidth-2.5em}@{}}
+        \emph{#1}: & #2
+    \end{tabular}\par
+}
+
+\begin{document}
+
+\section{Flow Problems}
+
+As a warm-up, let us define the \redbox{Maximum Flow} problem on which both of our problems are based.
+
+A \emph{flow network} is a tuple $\mathcal{G} = (G, s, t)$ where $G = (V, E, \mathbf{c})$ is a network and $s, t \in V, s \neq t$.
+
+The \redbox{Maximum Flow} problem is:
+
+\begin{problembox}{Maximum Flow}
+\problemitem{Input}{A flow network $\mathcal{G} = (G, s, t)$.}
+\problemitem{Find}{A satisfying $st$-flow of maximum value.}
+\end{problembox}
+
+We also define a similar problem which, for our purposes, acts like a decision version of the \redbox{Maximum Flow} problem.
+
+\begin{problembox}{Fixed-Demand Flow}
+\problemitem{Input}{A flow network $\mathcal{G} = (G, s, t)$, demand $d \in \mathbb{R}_0^+$ (i.e., $d \in \mathbb{R}, d \geq 0$).}
+\problemitem{Find}{A satisfying $st$-flow of value $d$.}
+\end{problembox}
+
+It is trivial to see that whenever there exists a satisfying flow $\mathbf{f}$ of value $d$, there also exists a satisfying flow of value $d' < d$: one may simply scale $\mathbf{f}$ down by a correct factor.
+
+Both problems can be generalised by introducing a vector $\mathbf{w} \in \mathbb{R}^E$ of costs per one flow unit transported along each edge. Then the task is not only to find a maximum or satisfying flow, but to find one that minimises $\mathbf{w} \cdot \mathbf{f}$ at that:
+
+\begin{problembox}{Minimum-Cost Maximum Flow (MCMF)}
+\problemitem{Input}{A flow network $\mathcal{G} = (G, s, t)$, weights $\mathbf{w} \in \mathbb{R}^E$.}
+\problemitem{Find}{A satisfying $st$-flow $\mathbf{f}$ that primarily maximises $|\mathbf{f}|$ and secondarily minimises $\mathbf{w} \cdot \mathbf{f}$.}
+\end{problembox}
+
+\end{document}
