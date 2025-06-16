@@ -22,7 +22,6 @@
 
   - introduce the problem in relation to different known studied problems and how the problem of approximate symmetries naturally arises when following the logic of these problems
     - show how these problems differ and how do they relate
-  - 
 
 ## Problem overview
 
@@ -31,7 +30,7 @@
 - introduce the problem of graph symmetries (Why? Oh woe why?)
 
 - quick overview (setup, playground, reiteration)
-- goal is to look for approximate symmetries in networks that do not necessarily have one in a _strinct_ sense
+- goal is to look for approximate symmetries in networks that do not necessarily have one in a _strict_ sense
 
 - introduce the measure proposed by approximate symmetries proposed by Liu
   - what does it represent?

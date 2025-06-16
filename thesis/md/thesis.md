@@ -32,9 +32,11 @@
 
 ## Problem Overview
 
-[GOAL: ??? ]
+[GOAL: ???]
 
 [INSERT: Personal Artistic Intro to Notation]
+    - Present the problem in relation to different problems
+    - make the problem emerge as a natural consequence
 
 [INSERT: Factual overview of what is contained in this chapter]
 
@@ -42,88 +44,246 @@
     => [TODO(organize): Organize this information into coherent blocks] 
     => [TODO(story): Create a story from this information] 
 {
-- motivation for studying this problem
-    - brain symmetries
-    - look at problem from different angle
-    - problem in relation to different problems
-- General overview and definitions of the problems
+- General Overview and Definitions of the Problems
 
-- Graph Isomorphism (GI)
-- Graph Matching Problem (GMP)
-- Quadratic Assignment Problem (QAP)
-- Approximate Symmetry Problem
-    - Introduce Approximate symmetry metrics (relate to GMP)
-    - Introduce the fragility of approximate symmetries on an example
-    - Relax
-      - Why relax GMP or QAP
+- [ ] Graph Isomorphism (GI)
+- [ ] Graph Matching Problem (GMP)
+- [ ] Quadratic Assignment Problem (QAP)
+- [ ] Approximate Symmetry Problem (ASP)
+    - [ ] Introduce Approximate Symmetry Metrics (relate to GMP)
+        - Introduced by Liu
+        - [ ] E(A, P)
+            - [ ] Informal motivation for the metric
+            - [ ] Formal Definition
+        - [ ] \mathcal{E}(E, P)
+            - [ ] Informal motivation for the metric
+            - [ ] Formal Definition
+        - [ ] S(A)
+            - [ ] Informal motivation for the metric
+            - [ ] Formal definition
+    - [ ] Definition of AS
+    - [ ] Fragility of Symmetries
+        - Idea that a small change can result in destruction of great number of symmetries
+        - Introduce the fragility of approximate symmetries on an example
+            - Square grid example
+    - [ ] Relax
+      - [ ] Definition of Doubly Stochastic Matrix
+      - [ ] Birkhoff polytope
+        - [ ] Definition
+        - [ ] Cite original Birkhoff result
+      - Why relax QAP instead of GMP
+        - Relax at your own risk paper.
 
-- Linear Assignment Problem (LAP)
+- [ ] Linear Assignment Problem (LAP)
+    - [ ] Informal Problem Motivation
+    - [ ] Formal Problem definition
+    - [ ] Polynomial complexity of the problem with efficient algorithms
+        - [ ] Hungarian Algorithm
+        - [ ] ??? the second algorithm
 
-- Representing Permutations
-    - overview ways of how permutation can be represented
-    - sorting networks
+- [ ] Representing Permutations
+    - [ ] Definition
+        - Formal definition of a permutation
+            - as a function (\pi)
+                - [ ] Formal definition
+    - overview ways of different how permutation can be represented
+        - NOTE: This will be usefull when modeling
+        - as a vector (dimension n)
+            - explicitly (permutation of {1, 2, ..., n}) (dimension n - 1 if we are smart)
+            - implicitly (argsort of a vector from R^n s.t. no two elements are equal) (dimension n)
+        - as a permutation matrix 
+            - [ ] Formal definition
+    - Honorable mention: Through Sorting Networks, as an extension polytope of permutahedron(n log n)
+        - this is relaxed way
+        - put this in a footnote since I am not using it anywhere in the thesis but I do find it a neat result
 
-- Problems Specific to Approximate Symmetries
-    - Choosing a starting Point
-    - Excluding Identity
-    - Not Well-definededness of the Problem
-    - Mapping relaxed permutation back to a permutation
 
-- Literature Review
-    - Present work fo Liu, Vandenberghe, Matej Straka, Franta Sczepanik
-    - Liu => Franta Sczepanik
-    - Vandenberghe => Matej Straka
-    - David Hartman, Pidnebesna
+- [ ] Problems Specific to Approximate Symmetries
+    - [ ] Not Well-definededness of the Problem
+        - If we find a 2 vertices of degree 1 with a common neighbour, then switching them presents already a symmetry
+        - Is this the kind of symmetry we want to find => It is quite local
+        - Maybe we want a more kind of global symmetry (i.e. such that will move around many vertices)
+            - we can do this by penalizing fixed points
+        - However, ideally, we want both and have a way to choose
+        - More generaly we might want a way or a description of how symmetries of a graph look if we allow k-fixed points
+
 }
 
 
-[INSERT: Personal Artistic Segway to Manifold Optimization]
+[INSERT: Personal Artistic Segway to Interior Point]
 
-## Optimization on Smooth Surfaces
+## Interior Point Optimization
 
-[INSERT: Personal Artistic Intro to Manifold optimization]
+[GOAL: ???]
+
+[INSERT: Personal Artistic Intro to Interior Point Optimization]
+    - maturity of the method
+    - main source is Nocedal; look there for exposition
+    - interior point methods gained popularity after popularity in LP
+    - interior point naming
+
+[INSERT: Factual overview of what is contained in this chapter]
 
 [!TODO(writeup): Compile all points I want to include in this chapter] 
     => [TODO(organize): Organize this information into coherent blocks] 
     => [TODO(story): Create a story from this information] 
 {
-- manifold optimization in general terms (not DS specific)
-- stop 0 of optimization
-- submanifold
-- ambient space
-- general optimization problem
-- classical (un)costrained optimization vs manifold optimization, 
-- smooth manifold definition through local defining functions
-- geometry
-- tangent spaces
-- retractions
-    - first order approximations to exponential maps
-- riemannian metrics
-- vector transport
-- riemannian distances and metrics
-- Practical libraries - manopt
-  - gradient descent
-  - trust region
-  - conjugate gradients
-- exponential problem / exponential map / logarithmic map
-    - exponential map is often difficult to find
-    - in practice retractions are often used
-- geodesic
-- moving along geodesics
-- Lie groups
-- riemannian gradient computation  
-  - in practice compute euclidean gradient
--manifolds without known geodesic
-- multiple riemannian metrics
-- distance along tangent vectors
-- time parameter
-- higher order retractions
-- retractions vs true geodesics in practice
+  - [ ] Problem Setup
+    - [ ] Definition
+    - include basic definitions and assumptions about the problem
+
+  - [ ] Algorithm Idea
+    - describe the main idea of the algorithm informally in a paragraph, at this point in such a way as not to require any prerequisite knowledge and definitions
+    - Interior Point Framework
+
+  - [ ] Barrier approach
+    - Barrier function optimization
+    - [ ] Formal mathematical description
+
+  - [ ] Central Path
+    - [ ] Definition (formal)
+        - what is the central path formally
+    - Informal description
+
+  - [ ] KKT System
+    - [ ] Theorem (KKT)
+    - [ ] Derivation of the KKT System
+
+  - [ ] Primal-Dual Interior Point Method
+    - [ ] Basic idea (informal)
+    - [ ] Formal definition
+    - [ ] Sidenote about what would it mean to 
+
+  - [ ] Solving the KKT system
+    - [ ] Newton's Method for the KKT System
+    - [ ] Note about hidden dragons and problems with this system and how much of a problem and pain it is to solve it quickly or approximately
+
 
 }
 
 [INSERT: Personal Artistic Segway to Manifold Optimization]
 
+## Manifold Optimization
+
+[INSERT: Personal Artistic Intro to Manifold optimization]
+    - we can decrease the dimension of the problem
+
+[!TODO(writeup): Compile all points I want to include in this chapter] 
+    => [TODO(organize): Organize this information into coherent blocks] 
+    => [TODO(story): Create a story from this information] 
+{
+
+[
+    GOALS:
+        - provide an introduction to manifold optimization to someone who is already well-versed in standard optimization techniques
+        - present the parallels and differences of classical constrained optimization and manifold optimization
+        - provide necessary background information, motivation, concepts and definition enough to understand how the steepest descent algorithm on manifolds works
+        - introduce the technical and computational challenges like moving along the geodesic in complex manifolds
+        - introduce practical optimization approaches and in used in practice when the exact description is not available (for example cannot compute the geodesic => we have to make do with retractions)
+]
+
+- [ ] Optimization and Structure
+    - [ ] General Optimization Problem
+    - [ ] Classical (un)constrained optimization vs. manifold optimization
+    - [ ] Exploiting Geometry in optimization
+
+
+- [ ] Manifold Definition
+
+    - [ ] Embedding Space
+        - [ ] Definition
+
+    - [ ] Submanifold
+        - [ ] Definition
+
+    - [ ] Embedded Submanifold
+        - [ ] Definition
+
+    - [ ] Smooth Manifold Definition through Local Defining Functions
+        - [ ] Definition
+        - NOTE: the definition will not be necessary for us and we will not use it
+
+
+- [ ] Manifold Optimization in General Terms (not DS specific)
+
+    - [ ] Tangent Spaces
+        - [ ] Definition
+
+    - [ ] Riemannian Distances and Metrics
+        - [ ] Riemannian Metric
+            - [ ] Multiple Riemannian Metrics
+                - for each manifold there can be multiple (just as for standard euclidean spaces) 
+                - there is a natural metric inherited from the euclidean space
+        - [ ] Riemannian Distance
+
+    - [ ] Riemannian Gradient
+        - [ ] Definition
+        - [ ] Riemannian Gradient Computation  
+            - in practice compute euclidean gradient and project it to tangent space
+
+    - [ ] Exponential problem 
+        - [ ] Geodesic
+            - [ ] Definition
+            - [ ] Moving along geodesics
+                - Time parameter, Distance along tangent vectors interpretation
+            - [ ] Manifolds without known geodesic
+                - NOTE: some manifold have nice geodesic (Lie groups connection)
+        - [ ] Exponential map / Logarithmic map
+          -  [ ] Definition of an exponential map / Log map
+        - [ ] Exponential map is often difficult to find
+            - ODE description and definition
+        - [ ] Lie groups
+            - [ ] Definition
+            - Important: ! have explicit expression for the geodesic
+            - the tangent space is "homogeneous" at all places
+            - mention the historical origin of the name for "exponential map"
+
+    - [ ] Retractions
+        - [ ] Definition
+            - First order approximations to exponential maps
+        - [ ] retractions vs true geodesics in practice
+            - in practice retractions are often used instead of exponential map
+
+
+- [ ] Practical Implementation 
+
+  - [ ] Steepest descent
+    - [ ] Algorithm
+        - Informal description of the algorithm
+        - Formal definition of the algorithm (simple, schematic)
+
+  - [ ] Other algorithms
+    - Adaptations of other algorithms are possible (require bit more advanced concept like riemannian hessians and vector/parallel transport)
+        - Trust Region
+        - Conjugate Gradients
+
+}
+
+[INSERT: Personal Artistic Segway to Manifold Optimization]
+
+## Literature Review
+
+[INSERT: Personal Artistic Intro to Methods]
+
+[
+    INSERT: Factual overview of all things contained in this chapter;
+    DEPENDSON: All the information in this chapter is done
+]
+
+{
+- [ ] Literature Review
+    - Present work fo Liu, Vandenberghe, Matej Straka, Franta Sczepanik, Pidnebesna, Hartmann
+    - [ ] Liu => Franta Sczepanik
+        - [ ] Liu
+        - [ ] Franta Sczepanik
+            - Looks on the problem through combinatorial optimization using local search through the Simulated Annealing algorithm and tries to find more fitting permutations by using descriptors (? Is descriptor the right word) of complex networks
+    - [ ] Vandenberghe => Matej Straka => David Hartman, Pidnebesna
+        - [ ] Vandenberge fQAP algorithm original algorithm and method to solve relaxed approximate symmetries
+        - [ ] Matej Straka
+          - looked at improvements of the Liu SA, and Vandenberge fQAP algorithms
+        - [ ] Pidnebesna, Hartman
+          - QSA algorithm, compiled results on ER graphs, BA, LRM
+}
 
 ## Summary
 
@@ -147,11 +307,34 @@
     => [TODO(organize): Organize this information into coherent blocks] 
     => [TODO(story): Create a story from this information] 
 {
+
+- [ ] Optimization Problems specific to AS
+    - [ ] Excluding Identity
+    - [ ] Choosing a Starting Point
+    - [ ] Mapping relaxed permutation (from Birkhoff polytope) back to a permutation
+
  - [ ] QSA
+
  - [ ] Interior Point Method
+  - [ ] IP for Approximate Symmetries
+    - IP for quadratic systems
+    - Special Case : Nonconvex Quadratic Problems
+    - Practical Implementation Considerations
+    - IPOPT Optimizer
+        - Solver specific optimization techniques that make corrections, improvements, special tricks, strategies and approximations to arrive at better solutions and to be more robust and more quick
+        - It is a line-search interior point method
+          - [TODO: In a sentence what does this mean?]
+    - [ ] Handling Nonconvexity
+        - IPOPT's Approach
+
+
  - [ ] Manifold
+   - [ ] Manopt (Library for optimization on manifolds)
+
  - [ ] OT4P
+
  - [ ] SoftSort
+
 }
 
 [INSERT: Personal Artistic Segway to Methods]
@@ -171,6 +354,8 @@
 [INSERT: Factual overview of all results]
 
 ## Future Work
+
+[INSERT: Include future work]
 
 # Appendix
 
