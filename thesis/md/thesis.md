@@ -299,6 +299,18 @@
 [INSERT: Personal Artistic Intro to Methods]
 
 [
+    INSERT: Factual overview of all things contained in this chapter (chapter organization);
+    DEPENDSON: All the information in this chapter is done
+]
+
+[INSERT: Personal Artistic Segway to QSA]
+
+## QSA
+[GOAL: ??? ]
+
+[INSERT: Personal Artistic Intro to Methods]
+
+[
     INSERT: Factual overview of all things contained in this chapter;
     DEPENDSON: All the information in this chapter is done
 ]
@@ -307,14 +319,33 @@
     => [TODO(organize): Organize this information into coherent blocks] 
     => [TODO(story): Create a story from this information] 
 {
+ - [ ] QSA
 
 - [ ] Optimization Problems specific to AS
     - [ ] Excluding Identity
     - [ ] Choosing a Starting Point
     - [ ] Mapping relaxed permutation (from Birkhoff polytope) back to a permutation
 
- - [ ] QSA
+- [ ] We use analytical gradient computation
 
+}
+
+[INSERT: Personal Artistic Segway to Methods]
+
+## Interior Point Method
+[GOAL: ??? ]
+
+[INSERT: Personal Artistic Intro to Methods]
+
+[
+    INSERT: Factual overview of all things contained in this chapter;
+    DEPENDSON: All the information in this chapter is done
+]
+
+[!TODO(writeup): Compile all points I want to include in this chapter] 
+    => [TODO(organize): Organize this information into coherent blocks] 
+    => [TODO(story): Create a story from this information] 
+{
  - [ ] Interior Point Method
   - [ ] IP for Approximate Symmetries
     - IP for quadratic systems
@@ -327,17 +358,87 @@
     - [ ] Handling Nonconvexity
         - IPOPT's Approach
 
-
- - [ ] Manifold
-   - [ ] Manopt (Library for optimization on manifolds)
-
- - [ ] OT4P
-
- - [ ] SoftSort
-
+ - [ ] we use analytical gradient computation
 }
 
 [INSERT: Personal Artistic Segway to Methods]
+
+## Manifold
+
+[GOAL: ??? ]
+
+[INSERT: Personal Artistic Intro to Methods]
+
+[
+    INSERT: Factual overview of all things contained in this chapter;
+    DEPENDSON: All the information in this chapter is done
+]
+
+[!TODO(writeup): Compile all points I want to include in this chapter] 
+    => [TODO(organize): Organize this information into coherent blocks] 
+    => [TODO(story): Create a story from this information] 
+{
+ - [ ] Manifold
+   - [ ] Manopt (Library for optimization on manifolds)
+
+ - [  ] note AutoDiff using pytorch is being used
+}
+
+[INSERT: Personal Artistic Segway to Methods]
+
+## Orthogonal Relaxation
+
+[GOAL: ??? ]
+
+[INSERT: Personal Artistic Intro to OT4P]
+
+[
+    INSERT: Factual overview of all things contained in this chapter;
+    DEPENDSON: All the information in this chapter is done
+]
+
+[!TODO(writeup): Compile all points I want to include in this chapter] 
+    => [TODO(organize): Organize this information into coherent blocks] 
+    => [TODO(story): Create a story from this information] 
+{
+ - [ ] OT4P
+
+ - [ ] Note AutoDiff using pytorch is being used
+}
+
+[INSERT: Personal Artistic Segway to Methods]
+
+## SoftSort
+[GOAL: ??? ]
+
+[INSERT: Personal Artistic Intro to Methods]
+
+[
+    INSERT: Factual overview of all things contained in this chapter;
+    DEPENDSON: All the information in this chapter is done
+]
+
+[!TODO(writeup): Compile all points I want to include in this chapter] 
+    => [TODO(organize): Organize this information into coherent blocks] 
+    => [TODO(story): Create a story from this information] 
+{
+
+ - [ ] SoftSort
+
+ - [ ] Note automatic differentiation using pytorch is being used
+}
+
+[INSERT: Personal Artistic Segway to Methods]
+
+## Summary
+[GOAL: ??? ]
+
+[
+    INSERT: Factual overview of all things contained in this chapter;
+    DEPENDSON: All the information in this chapter is done
+]
+
+[INSERT: Personal Artistic Segway to Experimental Results]
 
 # Experimental Results
 

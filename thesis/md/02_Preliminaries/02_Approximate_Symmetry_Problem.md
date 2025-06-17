@@ -189,6 +189,18 @@
 - compare the properties of QAP and GMP compare the properties of both of these problems
   - binary QP + LC => NP hard to find global optimum
 
+```latex
+\subsection*{Problem Formulation}
+
+The classical Quadratic Assignment Problem (QAP) seeks to find a permutation matrix $\bm{P} \in \setP$ (where $\setP$ is the set of $n \times n$ permutation matrices) that minimizes an objective function, often of the form $f(\bm{P}) = \tr(\bm{A} \bm{P} \bm{B}^T \bm{P}^T)$, where $\bm{A}$ and $\bm{B}$ are given square matrices \cite{Koopmans1957}. This formulation is central to problems like graph matching, where $\bm{A}$ and $\bm{B}$ might represent adjacency matrices of two graphs, and the objective is equivalent to minimizing $-\tr(\bm{A} \bm{P} \bm{B}^T \bm{P}^T)$ to maximize edge overlap \cite{Vogelstein2014}.
+
+The QSA algorithm addresses a related but distinct objective function:
+\begin{equation} \label{eq:qsa_objective}
+f(\bm{P}) = -\tr(\bm{A} \bm{P} \bm{A} \bm{P}^T) + \tr(\text{diag}(\bm{c}) \bm{P})
+\end{equation}
+where $\bm{A}$ is an $n \times n$ symmetric matrix (i.e., $\bm{A} = \bm{A}^T$), $\bm{P}$ is the $n \times n}$ matrix variable, and $\bm{c}$ is an $n$-dimensional vector. The first term, $-\tr(\bm{A} \bm{P} \bm{A} \bm{P}^T)$, captures a quadratic interaction related to structural alignment, similar to the QAP but using the matrix $\bm{A}$ in both roles. The second term, $\tr(\text{diag}(\bm{c}) \bm{P}) = \sum_{i=1}^n c_i P_{ii}$, serves as a linear penalty or reward for the diagonal elements of $\bm{P}$. This term can be used, for example, to penalize ($c_i < 0$) or encourage ($c_i > 0$) fixed points in the assignment represented by $\bm{P}$.
+```
+
 #### Linear Assignment Problem
 
 - [TODO(problem) : Include formal definition of the problem (latex template)]
