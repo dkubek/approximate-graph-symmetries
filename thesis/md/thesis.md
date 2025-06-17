@@ -79,7 +79,7 @@
     - [ ] Formal Problem definition
     - [ ] Polynomial complexity of the problem with efficient algorithms
         - [ ] Hungarian Algorithm
-        - [ ] ??? the second algorithm
+        - [ ] Jonker 1987
 
 - [ ] Representing Permutations
     - [ ] Definition
@@ -446,7 +446,11 @@
 
  - [ ] Note on automatic differentiation
 
-[INSERT: Personal Artistic Segway to Methods]
+[INSERT: Personal Artistic Segway to Experimental Results]
+
+## Graph Instances
+
+[INSERT: Personal Artistic Segway to Graph Instances]
 
 # Conclusion
 
