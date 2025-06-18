@@ -152,7 +152,6 @@
   - [ ] Primal-Dual Interior Point Method
     - [ ] Basic idea (informal)
     - [ ] Formal definition
-    - [ ] Sidenote about what would it mean to 
 
   - [ ] Solving the KKT system
     - [ ] Newton's Method for the KKT System
@@ -303,6 +302,13 @@
     DEPENDSON: All the information in this chapter is done
 ]
 
+
+- [ ] Optimization Problems specific to AS
+    - [ ] Excluding Identity
+    - [ ] Choosing a Starting Point
+        - [ ] Sinkhorn-Knopp algorithm
+            - [TODO: Include landmark paper and description]
+
 [INSERT: Personal Artistic Segway to QSA]
 
 ## QSA
@@ -320,11 +326,6 @@
     => [TODO(story): Create a story from this information] 
 {
  - [ ] QSA
-
-- [ ] Optimization Problems specific to AS
-    - [ ] Excluding Identity
-    - [ ] Choosing a Starting Point
-    - [ ] Mapping relaxed permutation (from Birkhoff polytope) back to a permutation
 
 - [ ] We use analytical gradient computation
 
@@ -365,7 +366,15 @@
 
 ## Manifold
 
-[GOAL: ??? ]
+[GOAL:
+    - Focus of this chapter is to present the manifold optimization based on the already build groundwork in the Preliminaries chapter
+    - the focus is to present the specific context of doubly stochastic matrices and the specific definitions for them
+    - focus on specific forms of concepts like manifold, tangent space, projection and riemannian gradient for the DS Manifold
+    - Show how to reformulate the original approximate symmetries problem in context of DS Manifold Optimization
+    - Present the concrete approach we use
+        - Using the python Manopt library with the steepest descent algorithm
+
+ ]
 
 [INSERT: Personal Artistic Intro to Methods]
 
@@ -378,8 +387,18 @@
     => [TODO(organize): Organize this information into coherent blocks] 
     => [TODO(story): Create a story from this information] 
 {
- - [ ] Manifold
-   - [ ] Manopt (Library for optimization on manifolds)
+   - [ ] The Doubly Stochastic Manifold
+    - [ ] Manifold - Concrete form for DS
+    - [ ] Tangent Space - Concrete form for DS
+    - [ ] Projection and Retraction - Concrete form for DS (Sinkhorn projection)
+    - [ ] Riemannian Gradient - Concrete form for DS (using projection)
+  - [ ] Algorithm Used
+    - [ ] Steepest descent
+        - [ ] Include complexity and empirical performance of the approach (from paper)
+  - [ ] Manifold optimization for approximate symmetries
+    - [ ] Manopt (Library for optimization on manifolds)
+        -  pytorch for automatic differentiation
+    - Describe how exactly we adapt the manifold optimization framework for the problem of approximate symmetries
 
  - [  ] note AutoDiff using pytorch is being used
 }
@@ -401,7 +420,27 @@
     => [TODO(organize): Organize this information into coherent blocks] 
     => [TODO(story): Create a story from this information] 
 {
- - [ ] OT4P
+
+ - [ ] Present results of the OT4P paper
+ - [ ] Core Idea
+ - [ ] Definitions
+    - [ ] Skew-Symmetric Matrices
+    - [ ] Matrix Exponential, Matrix logarithm
+    - [ ] Lie group
+    - [ ] Special Orthogonal, Orthogonal Group
+ - [ ] Two-Step Framework
+    - [ ] The two step framework summary
+    - [ ] Step 1
+        - [ ] Vector Representation
+        - [ ] Mathematical Properties
+    - [ ] Step 2
+        - [ ] Finding closest permutation
+        - [ ] Geodesic Interpolation
+    - [ ] Additional considerations
+ - [ ] Birkhoff polytope vs. Orthogonal Rleaxation approach
+ - [ ] Advantages and comparison to Birkhoff
+ - [ ] Implementation issues
+    - [ ] Efficiency
 
  - [ ] Note AutoDiff using pytorch is being used
 }
@@ -423,7 +462,14 @@
     => [TODO(story): Create a story from this information] 
 {
 
- - [ ] SoftSort
+- [ ] Core concepts and mathematical description
+- [ ] Definition (SoftSort)
+  - [ ] Diagram
+- [ ] Theoretical Properties of SoftSort
+- [ ] Dimensionality Reduction
+- [ ] Integration with Annealing schemes
+- [ ] Performance Characteristics and Limitations
+- [ ] Connection Approximate Symmetry Problem
 
  - [ ] Note automatic differentiation using pytorch is being used
 }

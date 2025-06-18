@@ -4,6 +4,44 @@
 
 - the chapther will be organized as follows, firstly we present the QSA algorithm which is the starting point of this entire journey as well as the starting point of out rhinking process regarding the search for a better, more optimized, more robus, nmore efficient and in short better (for the lack of better term) algorithm. Next we think about the natural step whenm viewing the problem in the lens of constrained optimization and thatwe can utilize the robust and mature environment of constraint programming solvers. We utilize the InteriorPoint solver in hope of beating the performance of the simple Frank-Wolfe algorithm. Next, we try to incorporate the geometry of the space fo double stochastic matrices into aout problem .Until now, we have thought about the constraints as more or less black box feasible-space defining equations. The feasible requion tha of the Birkhoff polytope however has a a special structure and that is that of a smooth surface - manifold.We continue in the discussion of feasible reqion geometry and manifold optimization in the next chapter as well, where we consider a slightly different relaxation of the set of all permutations. We relax the permutations into the space of all orthogonal matrices using. Using the more efficient parametrization of matrices in this space we will be able to reduce the problem dimension and gain new isight on the problem of optimizing over permutations. Last but not least, we will try to reduce the dimension of the problem even further. Borrowing from the research of neural networks we will try to reduce the problem of optimizing over permutation matrices back to vectors through differentiable mappings.
 
+### Sinkhorn-Knopp algorithm
+
+- include discussion for the number of iterations of the sinkhorn algorithm
+- inlcude discussion that the number of iterations decreases as we are closer to the original the space of DS matrices
+    - this is the case in iterative gradient based algorithms where we move move a small distance along a set direction (does not move us far)
+    - [ ] Mapping relaxed permutation (from Birkhoff polytope) back to a permutation
+
+> No, the sources do **not** state that the Birkhoff polytope is embedded in the special orthogonal group. Instead, they present the Birkhoff polytope and the orthogonal group as **two distinct continuous spaces** that have been proposed for relaxing permutation matrices.
+> 
+> Here's a breakdown of what the sources indicate about each:
+> 
+> *   **Birkhoff Polytope ($B_n$)**: This is defined as the set of **doubly stochastic matrices**. A doubly stochastic matrix is a square matrix ($X \in \mathbb{R}^{n \times n}$) where all entries are positive ($X_{ij} > 0$), and each row and each column sums to 1. The dimension of the Birkhoff polytope is $(n-1)^2$.
+> *   **Special Orthogonal Group ($SO(n)$)**: This consists of all $n \times n$ **orthogonal matrices** ($O$) that satisfy $O^T O = OO^T = I$ and have a **determinant of +1**. The special orthogonal group is a differentiable manifold. Its dimension is $n(n-1)/2$.
+> 
+> A key distinction highlighted in the sources is their **representation dimension**:
+> *   The Birkhoff polytope has a dimension of $(n-1)^2$.
+> *   The orthogonal group has a lower dimension of $n(n-1)/2$.
+> 
+> While **permutation matrices** (which are square binary matrices with exactly one 1 in each row and column) are a subset of both doubly stochastic matrices (and thus lie within the Birkhoff polytope) and orthogonal matrices (and thus lie within the special orthogonal group), the Birkhoff polytope and the special orthogonal group are generally distinct sets with different defining properties. One is not embedded within the other.
+
+- Birkhoff polytope and pecial orthogonal groups are different spaces
+
+> No.  In fact, the Birkhoff–von Neumann theorem tells us that every $n\times n$ doubly stochastic matrix is a convex combination of permutation matrices—and apart from those permutation matrices, none of the interior (or “mixed”) doubly stochastic matrices is even orthogonal, let alone special‐orthogonal.
+> 
+> * **Orthogonality** requires $P^T P = I$.  A typical doubly stochastic matrix $D$ (with all entries strictly between 0 and 1) does *not* satisfy $D^T D = I$.
+> * **Special orthogonal** further demands $\det = +1$.  Among the permutation matrices, exactly those corresponding to even permutations lie in $\mathrm{SO}(n)$; the others have determinant $-1$.
+> * Thus
+> 
+>   $$
+>     \{\text{doubly stochastic matrices}\}\;\cap\;\mathrm{SO}(n)
+>     \;=\;\{\text{even permutation matrices}\},
+>   $$
+> 
+>   a finite (zero-dimensional) subset, not the whole Birkhoff polytope.
+> 
+> In particular, the convex hull of those even permutations (the Birkhoff polytope) is *not* contained in $\mathrm{SO}(n)$—only its vertices that happen to be even permutations lie there.
+> As an example consider barycenter, it is a DS matrix but singular
+
 ### Additional considerations
 
 #### Automatic differentiation
