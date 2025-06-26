@@ -18,7 +18,11 @@
 
 ## Notation
 
-[GOAL: ??? ]
+[
+    GOAL:
+        - introduce a unified notation for standard mathematical concepts
+        - use standard, clean, agreed-upon latex symbols and notation
+]
 
 [INSERT(write): Personal Artistic Intro to Notation]
 
@@ -32,7 +36,13 @@
 
 ## Problem Overview
 
-[GOAL: ???]
+[
+    GOAL:
+        - One of the most important overview chapters of the thesis
+        - Present a strong, matter of fact and natural story of how the problem of approximate symmetries came to be
+        - Present individual problems that are related to Approximate Symmetries
+        - Present the basic problems and where the difficulties of finding approximate symmetries lie
+]
 
 [INSERT: Personal Artistic Intro to Notation]
     - Present the problem in relation to different problems
@@ -45,6 +55,7 @@
     => [TODO(story): Create a story from this information] 
 {
 - General Overview and Definitions of the Problems
+    - NOTE: include complexity of the problems
 
 - [ ] Graph Isomorphism (GI)
 - [ ] Graph Matching Problem (GMP)
@@ -106,7 +117,6 @@
             - we can do this by penalizing fixed points
         - However, ideally, we want both and have a way to choose
         - More generaly we might want a way or a description of how symmetries of a graph look if we allow k-fixed points
-
 }
 
 
@@ -114,7 +124,11 @@
 
 ## Interior Point Optimization
 
-[GOAL: ???]
+[
+    GOAL:
+        - Present the basic idea and framework of the approximate symmetry problem
+        - at the end of the chapter, the reader
+]
 
 [INSERT: Personal Artistic Intro to Interior Point Optimization]
     - maturity of the method
@@ -156,8 +170,6 @@
   - [ ] Solving the KKT system
     - [ ] Newton's Method for the KKT System
     - [ ] Note about hidden dragons and problems with this system and how much of a problem and pain it is to solve it quickly or approximately
-
-
 }
 
 [INSERT: Personal Artistic Segway to Manifold Optimization]
@@ -312,6 +324,7 @@
 [INSERT: Personal Artistic Segway to QSA]
 
 ## QSA
+
 [GOAL: ??? ]
 
 [INSERT: Personal Artistic Intro to Methods]

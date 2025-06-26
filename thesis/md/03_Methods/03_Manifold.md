@@ -240,3 +240,95 @@
 <!-- - Describe how exactly we adapt the manifold optimization framework for the problem of approximate symmetries -->
 
  <!-- - [  ] note AutoDiff using pytorch is being used -->
+
+```
+\section{Manifold Optimization Algorithms}
+
+We now have all the tools needed to generalize classical optimization algorithms
+to manifolds: tangent spaces for local linearization, Riemannian gradients for
+descent directions, and retractions for movement along the manifold.
+
+\subsection{Riemannian Steepest Descent}
+
+\subsection{Advanced Algorithms}
+
+The framework extends naturally to more sophisticated methods:
+
+\begin{itemize}
+  \item \textbf{Riemannian Newton's Method}: Uses second-order
+    information via the Riemannian Hessian, requiring concepts of
+    parallel transport for vector fields on manifolds
+  \item \textbf{Riemannian Trust Region}: Builds quadratic models in
+    tangent spaces and uses retractions to return to the manifold
+    \cite{manifold_small}
+  \item \textbf{Riemannian Conjugate Gradients}: Constructs conjugate
+    directions using vector transport to connect tangent spaces at
+    different points
+\end{itemize}
+
+These advanced methods require additional geometric tools beyond the
+scope of this chapter, but they demonstrate the rich algorithmic
+possibilities enabled by the manifold optimization framework.
+
+\section{Benefits and Applications}
+
+Manifold optimization offers compelling advantages over classical
+constrained optimization approaches, particularly for problems where
+constraints naturally define geometric structure.
+
+\subsection{Dimension Reduction}
+
+Perhaps the most significant computational advantage is dimension
+reduction. When optimizing over an $n$-dimensional manifold
+$\mathcal{M}$ embedded in $\mathbb{R}^d$ with $n < d$, we effectively
+reduce the problem dimension from $d$ to $n$. This reduction can be dramatic:
+
+\begin{itemize}
+  \item The Stiefel manifold $\text{St}(p, k)$ of $p \times k$
+    orthogonal matrices has dimension $pk - k(k+1)/2$, significantly
+    less than the $pk$ ambient dimension
+  \item Spheres $\mathcal{S}^{d-1}$ have dimension $d-1$ instead of $d$
+  \item Fixed-rank matrix manifolds have dimension much smaller than
+    the full matrix space
+\end{itemize}
+
+This dimension reduction translates directly to computational savings
+in gradient computations, storage requirements, and algorithmic complexity.
+
+\subsection{Geometric Structure Preservation}
+
+Beyond dimension reduction, manifold optimization offers several
+structural advantages:
+
+\begin{itemize}
+  \item \textbf{Automatic constraint satisfaction}: All iterates
+    remain feasible by construction
+  \item \textbf{Natural parameterization}: The manifold structure
+    reflects the problem's inherent geometry
+  \item \textbf{Numerical stability}: Working directly on the
+    constraint manifold often improves conditioning
+  \item \textbf{Algorithmic elegance}: Many algorithms simplify when
+    constraints are treated geometrically rather than algebraically
+\end{itemize}
+
+\subsection{Applications Preview}
+
+The manifold optimization framework applies to numerous important
+problem classes. One particularly relevant example for this thesis
+involves doubly-stochastic matrices—matrices where all row and column
+sums equal one. These matrices form a complex manifold with both
+equality constraints (sum conditions) and inequality constraints
+(non-negativity), making them ideal candidates for the geometric
+optimization approaches developed in this chapter.
+
+The intersection of manifold optimization with discrete optimization
+problems, particularly those involving permutation-like structures,
+represents a fertile area where the dimension reduction and
+constraint-handling benefits of geometric methods can provide
+substantial computational advantages.
+
+The tools developed in this chapter—tangent spaces, Riemannian
+gradients, and retractions—form the mathematical foundation for
+tackling such challenging optimization problems while respecting
+their inherent geometric structure.
+```

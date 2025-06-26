@@ -99,3 +99,200 @@ techniques, is therefore essential for fast solution of large problems.
 
 <!-- - [ ] IP for Approximate Symmetries -->
 
+```
+\subsection{Barrier Parameter Update}
+
+A crucial component of the algorithm is the strategy for updating the barrier
+parameter \(\mu\). Two main approaches have proven effective in practice. The
+classical Fiacco-McCormick approach maintains \(\mu\) constant until the KKT
+conditions are satisfied to some tolerance, then reduces \(\mu\) by a fixed
+factor. Alternatively, adaptive strategies update \(\mu\) at every iteration
+based on the progress of the algorithm, often using complementarity-based
+heuristics that adjust the reduction rate according to how well the primal and
+dual variables are balanced~\cite{nocedal1999numerical}.
+
+The primal-dual framework provides a robust foundation for interior point
+methods, combining theoretical soundness with practical efficiency. By
+maintaining explicit control over both primal and dual variables and using the
+structured Newton system, the algorithm can navigate efficiently through the
+interior of the feasible region toward the optimal solution.
+
+\section{Computational Considerations}
+
+While the primal-dual framework provides an elegant theoretical foundation, the
+practical success of interior point methods depends critically on our ability
+to solve the Newton system efficiently and reliably. This seemingly
+straightforward linear algebra problem harbors several computational challenges
+that have driven decades of algorithmic innovation.
+
+\subsection{The Computational Challenge}
+
+The most significant computational challenge in interior point methods stems
+from the ill-conditioning that inevitably develops as the algorithm approaches
+the solution. As the barrier parameter \(\mu\) decreases toward zero, some
+elements of the diagonal matrices \(S\) and \(Z\) grow arbitrarily large while
+others approach zero. This creates a linear system whose condition number
+deteriorates rapidly, potentially leading to inaccurate solutions that
+compromise the algorithm's convergence~\cite{nocedal1999numerical}.
+
+More specifically, the matrix \(\Theta = S^{-1}Z\) in the symmetric formulation
+of the primal-dual system exhibits this ill-conditioning behavior. Some
+diagonal elements of \(\Theta\) diverge to infinity while others converge to
+zero as \(\mu \to 0\). Traditional wisdom might suggest that such
+ill-conditioning would destroy the accuracy of the computed Newton step, but
+surprisingly, the special structure of interior point linear systems often
+allows stable direct factorization methods to produce acceptable solutions
+despite the poor conditioning.
+
+\subsection{Solution Strategies}
+
+Several approaches have been developed to address these computational
+challenges. The most reliable strategy involves using symmetric indefinite
+factorization techniques, which can handle the indefinite structure of the
+primal-dual matrix while maintaining numerical stability. These methods compute
+a factorization of the form \(P^T K P = LBL^T\), where \(P\) represents
+permutations for sparsity and stability, \(L\) is lower triangular, and \(B\)
+is block diagonal~\cite{nocedal1999numerical}.
+
+For very large problems, iterative methods become attractive alternatives to
+direct factorization. However, the ill-conditioning issues that trouble direct
+methods become even more problematic for iterative approaches. Successful
+iterative methods for interior point systems require sophisticated
+preconditioning strategies that cluster the eigenvalues of the coefficient
+matrix and remove the artificial ill-conditioning introduced by the barrier
+approach.
+
+One elegant approach involves variable scalings that transform the
+ill-conditioned terms. For example, the substitution \(\tilde{p}_s = S^{-1/2}
+p_s\) can transform the matrix \(\Theta\) into \(S^{1/2} \Theta S^{1/2}\),
+which has much better conditioning properties as \(\mu\) approaches
+zero~\cite{nocedal1999numerical}.
+
+\subsection{Practical Implications}
+
+These computational challenges have several important practical implications.
+First, the choice of linear algebra approach—direct versus iterative—often
+depends more on problem structure and size than on theoretical preferences.
+Problems with special structure (such as those arising from discretized partial
+differential equations) may benefit from specialized iterative methods, while
+general nonlinear programs typically favor robust direct methods.
+
+Second, the quality of the linear system solution directly impacts the global
+convergence properties of the interior point method. Poor solutions can lead to
+steps that make insufficient progress or even cause the algorithm to fail
+entirely. This makes the linear algebra component not merely a computational
+detail but a core algorithmic concern.
+
+Finally, these challenges explain why interior point methods require more
+sophisticated implementation than their elegant theoretical description might
+suggest. Successfully handling the transition from well-conditioned systems
+early in the optimization to highly ill-conditioned systems near the solution
+requires careful attention to numerical details that are often invisible in
+high-level algorithmic descriptions.
+
+The computational challenges of interior point methods represent a fascinating
+intersection of numerical linear algebra and optimization theory. While these
+methods have proven remarkably successful in practice, their computational
+demands continue to drive research into more efficient and robust solution
+techniques.
+
+\section{Advantages and Limitations}
+
+As with any algorithmic approach, interior point methods come with distinct
+advantages and limitations that determine their suitability for different
+problem classes. Understanding these trade-offs is essential for making
+informed decisions about when to apply these methods in practice.
+
+\subsection{Key Advantages}
+
+The most significant advantage of interior point methods lies in their
+exceptional performance on large-scale optimization problems. Numerical
+experience demonstrates that these methods frequently outperform active-set SQP
+methods on large problems, particularly when the number of free variables is
+substantial~\cite{nocedal1999numerical}. This advantage stems from several
+factors.
+
+First, interior point methods avoid the combinatorial complexity that plagues
+active-set approaches. Rather than explicitly identifying which constraints
+should be active at the solution—a process that can require exponential time in
+the worst case—interior point methods treat all constraints uniformly
+throughout the optimization process. The correct active set emerges naturally
+as the barrier parameter decreases, without requiring discrete decisions by the
+algorithm.
+
+Second, the linear systems that arise in interior point methods have
+predictable block structure that can be exploited by specialized solvers. This
+structural regularity enables the development of efficient factorization
+techniques and iterative methods that scale well with problem size. Both direct
+factorization approaches and projected conjugate gradient methods are
+available, allowing practitioners to choose the most appropriate technique for
+their specific problem structure~\cite{nocedal1999numerical}.
+
+Third, interior point methods provide strong theoretical guarantees. Under
+appropriate regularity conditions, they exhibit polynomial-time complexity for
+convex problems and possess well-understood convergence properties for general
+nonlinear programs. This theoretical foundation provides confidence in the
+algorithm's behavior and enables the development of robust stopping criteria.
+
+Finally, the smooth nature of the central path provides inherent stability.
+Unlike active-set methods, which can exhibit cycling behavior or numerical
+difficulties when constraints become active or inactive, interior point methods
+follow a well-defined continuous trajectory toward the solution.
+
+\subsection{Notable Limitations}
+
+Despite their strengths, interior point methods suffer from several limitations
+that can impact their practical effectiveness. The most significant concern is
+their sensitivity to problem conditioning and algorithmic parameters. Interior
+point methods can be sensitive to the choice of initial point, the scaling of
+the problem, and the strategy used for updating the barrier
+parameter~\cite{nocedal1999numerical}.
+
+This sensitivity manifests most problematically when iterates approach the
+boundary of the feasible region prematurely. In such situations, interior point
+methods may experience difficulty escaping the boundary region, leading to slow
+convergence or even algorithmic failure. While adaptive strategies for updating
+the barrier parameter have reduced this sensitivity, it remains a consideration
+for practitioners.
+
+Another limitation stems from the universal treatment of constraints. While the
+uniform handling of all constraints is an advantage for problems where many
+constraints are active at the solution, it becomes a disadvantage when most
+constraints are inactive. Active-set methods can effectively ignore irrelevant
+constraints, focusing computational effort on the constraints that actually
+matter. In contrast, interior point methods must consider all constraints at
+every iteration, potentially making the cost of each iteration excessive for
+problems with many inactive constraints~\cite{nocedal1999numerical}.
+
+The robustness gap compared to active-set methods represents another practical
+concern. While significant advances continue to be made in interior point
+method design and implementation, these methods may not yet match the
+robustness of mature active-set codes in challenging problem
+instances~\cite{nocedal1999numerical}.
+
+Finally, the specialized linear algebra requirements of interior point methods
+can present implementation challenges. The need to handle ill-conditioned
+systems and maintain numerical stability as the barrier parameter decreases
+requires sophisticated techniques that may not be available in standard linear
+algebra libraries.
+
+\subsection{Practical Recommendations}
+
+The choice between interior point and active-set methods often depends on
+problem characteristics rather than theoretical preferences. Interior point
+methods excel for large-scale problems with dense constraint structure, where
+their ability to handle many constraints simultaneously provides clear
+advantages. They are particularly well-suited to problems arising from
+discretized continuous optimization problems, where the constraint structure
+exhibits regularity that can be exploited.
+
+Conversely, active-set methods may be preferable for problems where the optimal
+active set is small relative to the total number of constraints, or where
+robustness is more important than raw computational speed. The availability of
+warm-start capabilities in active-set methods also makes them attractive for
+solving sequences of related problems.
+
+Understanding these trade-offs enables practitioners to make informed
+algorithmic choices that align with their specific problem requirements and
+computational constraints.
+```
