@@ -79,7 +79,7 @@ def get_annealing_tau(
     i: int,
     decay_steps: int,
     initial_tau: float = 0.7,
-    final_tau: float = 0.1,
+    final_tau: float | None = 0.1,
     scheme: str = "linear",
 ) -> float:
     """
@@ -111,6 +111,10 @@ def get_annealing_tau(
         ValueError: If `scheme="exponential"` and `initial_tau` or `final_tau`
                     are negative.
     """
+
+    if final_tau == None:
+        return initial_tau
+
     if scheme not in _SCHEME_MAP:
         raise ValueError(
             f"Unknown scheme: '{scheme}'. Available schemes: {list(_SCHEME_MAP.keys())}"

@@ -66,7 +66,7 @@ class ManifoldConfig(BaseConfig):
 
 
 @dataclass
-class OT4PConfig(BaseConfig):
+class OT4P4ASConfig(BaseConfig):
     """Configuration for OT4P method."""
 
     max_iter: int = 3000
@@ -76,7 +76,6 @@ class OT4PConfig(BaseConfig):
     decay_steps: int = 5000
     learning_rate: float = 0.1
     min_rel_improvement: float = 1e-4
-    verbose: int = 1
 
 
 @dataclass
@@ -97,6 +96,7 @@ class SoftSortConfig(BaseConfig):
     annealing_scheme: str = "cosine"
     learning_rate: float = 0.1
     min_rel_improvement: float = 1e-4
+    verbose = 1
 
 
 @dataclass
@@ -110,7 +110,7 @@ class Config:
     # Method configurations
     InteriorPoint: InteriorPointConfig = field(default_factory=InteriorPointConfig)
     Manifold: ManifoldConfig = field(default_factory=ManifoldConfig)
-    OT4P4AS: OT4PConfig = field(default_factory=OT4PConfig)
+    OT4P4AS: OT4P4ASConfig = field(default_factory=OT4P4ASConfig)
     QSA: QSAConfig = field(default_factory=QSAConfig)
     SoftSort: SoftSortConfig = field(default_factory=SoftSortConfig)
 
