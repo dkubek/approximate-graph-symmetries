@@ -3,7 +3,7 @@ import time
 import cyipopt
 import numpy as np
 import scipy.sparse as sp
-from scipy.sparse import csr_matrix, diags, eye, kron
+from scipy.sparse import csr_matrix, diags, eye
 
 from AGS.initialization import (
     check_random_state,
@@ -22,7 +22,7 @@ class InteriorPoint:
     def __init__(
         self,
         max_iter=1000,
-        tol=1e-8,
+        tol=1e-6,
         rng=None,
         verbose=True,
     ):
@@ -46,11 +46,17 @@ class InteriorPoint:
         self._iteration_count = 0
 
     def _setup_sparsity_patterns(self):
-        """Pre-compute sparsity patterns for Jacobian."""
+        """Pre-compute sparsity patterns for Jacobian and Hessian."""
 
+        self._setup_jacobian_sparsity()
+
+        # Hessian sparsity pattern: A ⊗ A + A^T ⊗ A^T
+        self._setup_hessian_sparsity()
+
+    def _setup_jacobian_sparsity(self):
         n = self._n
 
-        # Row indices for Jacobian non-zeros
+        # Jacobian sparsity pattern
         jac_rows = []
         jac_cols = []
 
@@ -68,6 +74,22 @@ class InteriorPoint:
 
         self.jac_rows = np.array(jac_rows)
         self.jac_cols = np.array(jac_cols)
+
+    def _setup_hessian_sparsity(self):
+        """Compute sparsity pattern and values for the constant Hessian."""
+        n = self._n
+        
+        hess_sparse = sp.kron(self.A, self.A) + sp.kron(self.A, self.A)
+        
+        # Convert to COO format for easy indexing
+        hess_coo = hess_sparse.tocoo()
+        
+        # Extract lower triangular part
+        lower_mask = hess_coo.row >= hess_coo.col
+        
+        self.hess_rows = hess_coo.row[lower_mask]
+        self.hess_cols = hess_coo.col[lower_mask]
+        self.hess_values = hess_coo.data[lower_mask]
 
     def objective(self, x):
         """Compute objective value: -tr(APA^T P^T) + tr(diag(c)P)"""
@@ -120,6 +142,16 @@ class InteriorPoint:
     def jacobianstructure(self):
         """Return sparsity structure of Jacobian."""
         return (self.jac_rows, self.jac_cols)
+
+    def hessian(self, x, lagrange, obj_factor):
+        """Compute Hessian of the Lagrangian."""
+        # Since constraints are linear, their Hessian contribution is zero
+        # Hessian = obj_factor * (Hessian of objective)
+        return obj_factor * self.hess_values
+
+    def hessianstructure(self):
+        """Return sparsity structure of Hessian."""
+        return (self.hess_rows, self.hess_cols)
 
     def intermediate(
         self, alg_mod, iter_count, obj_value, inf_pr, inf_du, mu,
@@ -178,7 +210,7 @@ class InteriorPoint:
         else:
             self.c_diag = diags(c, format="csr")
 
-        # Pre-compute sparsity patterns
+        # Pre-compute sparsity patterns and Hessian values
         self._setup_sparsity_patterns()
 
         # Reset iteration counter
@@ -228,13 +260,16 @@ class InteriorPoint:
             nlp.add_option("print_level", 0)
             nlp.add_option("sb", "yes")
 
-        # Use L-BFGS for Hessian approximation (simpler and often sufficient)
+        # Use exact Hessian instead of approximation
         nlp.add_option("hessian_approximation", "limited-memory")
+        nlp.add_option("limited_memory_max_history", 10)
+        nlp.add_option("hessian_constant", "yes")
 
         # Optimize for interior point method
         nlp.add_option("mu_strategy", "adaptive")
         nlp.add_option("mehrotra_algorithm", "yes")
-        nlp.add_option("linear_solver", "ma57")
+        #nlp.add_option("linear_solver", "ma86")
+        nlp.add_option("linear_solver", "mumps")
 
         # Solve
         start_time = time.time()
