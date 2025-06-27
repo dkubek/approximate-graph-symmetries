@@ -15,6 +15,7 @@ class OT4P4AS:
         max_iter=3000,
         initial_tau=0.7,
         final_tau=0.5,
+        loss="indefinite",
         annealing_scheme="exponential",
         decay_steps=5000,
         learning_rate=1e-1,
@@ -36,6 +37,13 @@ class OT4P4AS:
         self.max_iter = max_iter
         self.learning_rate = learning_rate
 
+        if loss == "indefinite":
+            self.loss = self._loss_trace
+        elif loss == "convex":
+            self.loss = self._loss_norm
+        else:
+            ValueError(f"Loss {loss} is not recognized!")
+
         self.initial_tau = initial_tau
         self.final_tau = final_tau
         self.annealing_scheme = annealing_scheme
@@ -46,35 +54,34 @@ class OT4P4AS:
         self.verbose = verbose
 
         self.dtype = torch.float
-        self.device = (
-            torch.accelerator.current_accelerator().type
-            if torch.accelerator.is_available()
-            else "cpu"
-        )
-        self.device = self.device if self.device != "mps" else "cpu"
-        #self.device = "cpu"
+        self.device = "cpu"
         if self.verbose:
             print(f"Using {self.device} device")
 
-    def loss(self, A, P, c):
-        return self._loss_norm(A, P, c)
+    # def loss(self, A, P, c):
+    #    return self._loss_trace(A, P, c)
+    #    #return self._loss_norm(A, P, c)
 
     def _loss_trace(self, A, P, c):
         quadratic_term = -torch.trace(A @ P @ A.transpose(-2, -1) @ P.transpose(-2, -1))
 
         diag_elements = torch.diagonal(P, dim1=-2, dim2=-1)
+
+        # Classic penalty
         positive_diags = torch.pow(diag_elements, 2)
-        penalty = torch.sqrt(torch.sum(c * positive_diags))
+        penalty = torch.sum(c * positive_diags)
 
         return quadratic_term + penalty
 
     def _loss_norm(self, A, P, c):
-        # return torch.sqrt(torch.sum(torch.pow(P @ X @ P.transpose(-2, -1) - Y, 2))) + penalty
-        quadratic_term = torch.mean(torch.pow(P @ A @ P.transpose(-2, -1) - A, 2))
+        quadratic_term = (
+            1 / 2 * torch.sum(torch.pow(P @ A @ P.transpose(-2, -1) - A, 2))
+        )
 
         diag_elements = torch.diagonal(P, dim1=-2, dim2=-1)
+
+        # Classic penalty
         positive_diags = torch.pow(diag_elements, 2)
-        penalty = c * torch.sum(positive_diags, dim=-1)
         penalty = torch.sum(c * positive_diags)
 
         return quadratic_term + penalty
@@ -140,7 +147,6 @@ class OT4P4AS:
             perm_matrix = model(weightP, tau=current_tau)
             loss_val = self.loss(A, perm_matrix, c)
             loss_val.backward()
-            torch.nn.utils.clip_grad_norm_([weightP], max_norm=1.0)
             optimizer.step()
 
             # Compute validation loss
@@ -160,19 +166,15 @@ class OT4P4AS:
             # Update progress bar
             pbar.set_description(f"Loss: {loss_val.item():.6f}, Tau: {current_tau:.4f}")
 
-            if loss_val < 1e-6:
-                print(f"Converged to target threshold at iteration {i + 1}")
-                break
-
         end_time = time()
 
         P_opt = model(best_weight, tau=0).cpu().numpy()
-        
+
         return {
-            "P": P_opt, 
+            "P": P_opt,
             "metrics": {
                 "time": end_time - start_time,
                 "iterations": iterations_performed,
-                "best_iteration": best_iteration
-            }
+                "best_iteration": best_iteration,
+            },
         }

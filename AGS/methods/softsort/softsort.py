@@ -47,6 +47,7 @@ class SoftSort:
     def __init__(
         self,
         max_iter=2000,
+        loss="indefinite",
         initial_tau=1,
         final_tau=1e-6,
         annealing_scheme="cosine",
@@ -70,6 +71,13 @@ class SoftSort:
         self.max_iter = max_iter
         self.learning_rate = learning_rate
 
+        if loss == "indefinite":
+            self.loss = self._loss_trace
+        elif loss == "convex":
+            self.loss = self._loss_norm
+        else:
+            ValueError(f"Loss {loss} is not recognized!")
+
         self.initial_tau = initial_tau
         self.final_tau = final_tau
         self.annealing_scheme = annealing_scheme
@@ -88,11 +96,27 @@ class SoftSort:
         if self.verbose:
             print(f"Using {self.device} device")
 
-    def loss(self, A, P, c):
+    def _loss_trace(self, A, P, c):
+        quadratic_term = -torch.trace(A @ P @ A.transpose(-2, -1) @ P.transpose(-2, -1))
+
         diag_elements = torch.diagonal(P, dim1=-2, dim2=-1)
-        penalty = torch.sum(c * diag_elements, dim=-1)
-        # return torch.sqrt(torch.sum(torch.pow(P @ X @ P.transpose(-2, -1) - Y, 2))) + penalty
-        return torch.mean(torch.pow(P @ A @ P.transpose(-2, -1) - A, 2)) + penalty
+
+        # Classic penalty
+        penalty = torch.sum(c * diag_elements)
+
+        return quadratic_term + penalty
+
+    def _loss_norm(self, A, P, c):
+        quadratic_term = (
+            1 / 2 * torch.sum(torch.pow(P @ A @ P.transpose(-2, -1) - A, 2))
+        )
+
+        diag_elements = torch.diagonal(P, dim1=-2, dim2=-1)
+
+        # Classic penalty
+        penalty = torch.sum(c * diag_elements)
+
+        return quadratic_term + penalty
 
     def solve(
         self,
@@ -177,19 +201,15 @@ class SoftSort:
             # Update progress bar
             pbar.set_description(f"Loss: {loss_val.item():.6f}, Tau: {current_tau:.4f}")
 
-            if loss_val < 1e-5:
-                print(f"Converged to target threshold at iteration {i + 1}")
-                break
-
         end_time = time()
 
         P_opt = soft_sort(best_s, tau=1e-8).cpu().numpy()
-        
+
         return {
-            "P": P_opt, 
+            "P": P_opt,
             "metrics": {
                 "time": end_time - start_time,
                 "iterations": iterations_performed,
-                "best_iteration": best_iteration
-            }
+                "best_iteration": best_iteration,
+            },
         }
