@@ -7,6 +7,7 @@ import sys
 import itertools
 import subprocess
 import yaml
+import numpy as np
 from pathlib import Path
 from typing import Dict, List, Any
 
@@ -101,13 +102,15 @@ if __name__ == "__main__":
     print("Example 1: InteriorPoint parameter sweep")
     print("=" * 60)
 
+    #c_space = list(map(float, (np.linspace(0, 0.5, 11)[1:])))
+    c_space = [0.7, 0.85, 1] #list(map(float, (np.linspace(0, 1, 21)[1:])))
     param_grid_interior = {
-        "c": [0.01, 0.1, 0.3, 0.5, 1.0],
-        "max_iter": [100, 500, 2500],
+        "c": c_space,
+        "max_iter": [500],
     }
 
     run_parameter_sweep(
-        method="Manifold",
+        method="InteriorPoint",
         base_config=base_config,
         param_grid=param_grid_interior,
         dry_run=False,  # Set to False to actually run

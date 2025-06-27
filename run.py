@@ -71,6 +71,7 @@ class OT4P4ASConfig(BaseConfig):
 
     max_iter: int = 3000
     initial_tau: float = 0.7
+    loss: str = "convex"
     final_tau: float = 0.5
     annealing_scheme: str = "exponential"
     decay_steps: int = 5000
@@ -92,6 +93,7 @@ class SoftSortConfig(BaseConfig):
 
     max_iter: int = 2000
     initial_tau: float = 1.0
+    loss: str = "convex"
     final_tau: float = 1e-6
     annealing_scheme: str = "cosine"
     learning_rate: float = 0.1
@@ -189,6 +191,7 @@ def get_important_params(
             {
                 "max_iter": method_config.max_iter,
                 "initial_tau": method_config.initial_tau,
+                "loss": method_config.loss,
                 "final_tau": method_config.final_tau,
                 "learning_rate": method_config.learning_rate,
             }
@@ -205,6 +208,7 @@ def get_important_params(
             {
                 "max_iter": method_config.max_iter,
                 "initial_tau": method_config.initial_tau,
+                "loss": method_config.loss,
                 "final_tau": method_config.final_tau,
                 "learning_rate": method_config.learning_rate,
             }
@@ -306,7 +310,7 @@ def process_single_run(
 
 
 def process_simulation(
-    args: Tuple[str, str, Path, int, Config, bool],
+    args: Tuple[str, str, Path, int, Config, Path, bool],
 ) -> Optional[Dict[str, Any]]:
     """
     Process a single simulation.
@@ -317,7 +321,15 @@ def process_simulation(
     Returns:
         Dictionary with results or None if failed/skipped
     """
-    method_name, graph_type, instance_file, sim_idx, config, force_recompute = args
+    (
+        method_name,
+        graph_type,
+        instance_file,
+        sim_idx,
+        config,
+        results_base,
+        force_recompute,
+    ) = args
 
     try:
         instance_id_base = instance_file.stem
@@ -328,7 +340,7 @@ def process_simulation(
         param_dirname = get_param_dirname(method_name, method_config, config)
 
         # Check if already processed with new directory structure
-        results_path = Path("results") / method_name / param_dirname / graph_type
+        results_path = results_base / method_name / param_dirname / graph_type
         perm_file = results_path / "Permutations" / f"{instance_id}.csv"
 
         if perm_file.exists() and not force_recompute:
@@ -372,7 +384,7 @@ def process_simulation(
         return False
 
 
-def save_single_result(result_data: Dict[str, Any]) -> None:
+def save_single_result(result_data: Dict[str, Any], result_base: Path) -> None:
     """Save a single simulation result immediately."""
     if not result_data:
         return
@@ -385,10 +397,10 @@ def save_single_result(result_data: Dict[str, Any]) -> None:
     config = result_data["config"]
 
     # Create directories with new structure
-    base_path = Path("results") / method_name / param_dirname
+    base_path = result_base / method_name / param_dirname
     graph_path = base_path / graph_type
     (graph_path / "Permutations").mkdir(parents=True, exist_ok=True)
-    (graph_path / "RawOutputs").mkdir(parents=True, exist_ok=True)
+    # (graph_path / "RawOutputs").mkdir(parents=True, exist_ok=True)
     (graph_path / "Metrics").mkdir(parents=True, exist_ok=True)
 
     # Save config.json if it doesn't exist
@@ -400,32 +412,33 @@ def save_single_result(result_data: Dict[str, Any]) -> None:
     np.savetxt(perm_file, result_data["permutations"], delimiter=",", fmt="%d")
 
     # Save raw matrices
-    raw_file = graph_path / "RawOutputs" / f"{instance_id}.npz"
-    matrix_dict = {f"P_{i}": mat for i, mat in enumerate(result_data["matrices"])}
-    np.savez(raw_file, **matrix_dict)
+    # raw_file = graph_path / "RawOutputs" / f"{instance_id}.npz"
+    # matrix_dict = {f"P_{i}": mat for i, mat in enumerate(result_data["matrices"])}
+    # np.savez(raw_file, **matrix_dict)
 
     # Save metrics
     metrics_file = graph_path / "Metrics" / f"{instance_id}.csv"
-    
+
     # Prepare metrics data for CSV
     metrics_list = result_data["metrics"]
-    
+
     # Add run_id to each metric dict
     for i, metric_dict in enumerate(metrics_list):
         metric_dict["run_id"] = i
-    
+
     # Write metrics to CSV
     if metrics_list:
         # Get all unique keys across all runs (for flexible columns)
         all_keys = set()
         for m in metrics_list:
             all_keys.update(m.keys())
-        
+
         # Sort keys for consistent column order (run_id first)
         fieldnames = ["run_id"] + sorted([k for k in all_keys if k != "run_id"])
-        
+
         import csv
-        with open(metrics_file, 'w', newline='') as f:
+
+        with open(metrics_file, "w", newline="") as f:
             writer = csv.DictWriter(f, fieldnames=fieldnames)
             writer.writeheader()
             writer.writerows(metrics_list)
@@ -451,7 +464,9 @@ def collect_work_items(
         List of (graph_type, instance_file, sim_idx) tuples
     """
     work_items = []
-    all_simulations = list(range(39))  # 0 to 38
+    # FIXME: RUN ON ALL SIMULATIONS
+    all_simulations = list(range(3))
+    # all_simulations = list(range(39))  # 0 to 38
 
     # Determine which simulations to process
     simulations_to_process = simulation_filter if simulation_filter else all_simulations
@@ -484,6 +499,7 @@ def collect_work_items(
 def run_optimization(
     methods: List[str],
     data_path: Path,
+    results_path: Path,
     config: Config,
     instance_filter: Optional[List[str]] = None,
     simulation_filter: Optional[List[int]] = None,
@@ -510,6 +526,7 @@ def run_optimization(
                     instance_file,
                     sim_idx,
                     config,
+                    results_path,
                     force_recompute,
                 )
             )
@@ -570,7 +587,7 @@ def run_optimization(
         for work_item in full_work_items:
             result = process_simulation(work_item)
             if result:
-                save_single_result(result)
+                save_single_result(result, results_path)
                 processed += 1
             elif result is None:
                 skipped += 1
@@ -755,6 +772,7 @@ def main():
     run_optimization(
         methods,
         args.data_path,
+        args.results_path,
         config,
         instance_filter=args.instances,
         simulation_filter=simulation_filter,

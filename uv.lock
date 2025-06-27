@@ -48,10 +48,12 @@ dependencies = [
 
 [package.dev-dependencies]
 dev = [
+    { name = "ipykernel" },
     { name = "ipython" },
     { name = "isort" },
     { name = "jupyter" },
     { name = "ruff" },
+    { name = "scienceplots" },
 ]
 
 [package.metadata]
@@ -70,10 +72,12 @@ requires-dist = [
 
 [package.metadata.requires-dev]
 dev = [
+    { name = "ipykernel", specifier = ">=6.29.5" },
     { name = "ipython", specifier = ">=9.3.0" },
     { name = "isort", specifier = ">=6.0.1" },
     { name = "jupyter", specifier = ">=1.1.1" },
     { name = "ruff", specifier = ">=0.11.13" },
+    { name = "scienceplots", specifier = ">=2.1.1" },
 ]
 
 [[package]]
@@ -1994,6 +1998,18 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/7c/91/263e33ab93ab09ca06ce4f8f8547a858cc198072f873ebc9be7466790bae/ruff-0.11.13-py3-none-win32.whl", hash = "sha256:96c27935418e4e8e77a26bb05962817f28b8ef3843a6c6cc49d8783b5507f250", size = 10474944, upload-time = "2025-06-05T21:00:08.459Z" },
     { url = "https://files.pythonhosted.org/packages/46/f4/7c27734ac2073aae8efb0119cae6931b6fb48017adf048fdf85c19337afc/ruff-0.11.13-py3-none-win_amd64.whl", hash = "sha256:29c3189895a8a6a657b7af4e97d330c8a3afd2c9c8f46c81e2fc5a31866517e3", size = 11548669, upload-time = "2025-06-05T21:00:11.147Z" },
     { url = "https://files.pythonhosted.org/packages/ec/bf/b273dd11673fed8a6bd46032c0ea2a04b2ac9bfa9c628756a5856ba113b0/ruff-0.11.13-py3-none-win_arm64.whl", hash = "sha256:b4385285e9179d608ff1d2fb9922062663c658605819a6876d8beef0c30b7f3b", size = 10683928, upload-time = "2025-06-05T21:00:13.758Z" },
+]
+
+[[package]]
+name = "scienceplots"
+version = "2.1.1"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "matplotlib" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/5e/04/aff33daa212cf6dd5427999062aab0289976dd1b0b842752e81ab17aef66/SciencePlots-2.1.1.tar.gz", hash = "sha256:d8d197e3410f87ebdad0b9c265eaab596094fb082d97123e835f6bc32800ab54", size = 10757, upload-time = "2023-11-25T19:10:12.943Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/51/2a/debffdd7061c7a65ab46c51e671b895dc8231c4a14950849c40699eb2070/SciencePlots-2.1.1-py3-none-any.whl", hash = "sha256:2e64d2e93b4f98702f30145dbb70d238f5dc315e227fec331489631232dfc9e0", size = 16472, upload-time = "2023-11-25T19:10:11.01Z" },
 ]
 
 [[package]]
