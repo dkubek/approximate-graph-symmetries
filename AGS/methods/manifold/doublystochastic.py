@@ -164,23 +164,29 @@ class DoublyStochastic(Manifold):
 
     def _retraction_simple(self, point, tangent_vector):
         """Simple first-order retraction."""
-        Y = point + tangent_vector
-        # Ensure positivity first
-        Y = np.maximum(Y, self._eps)
-        # Project to doubly stochastic
-        return _doubly_stochastic(
-            Y, self._sinkhorn_tol, self._max_sinkhorn_iters, self._eps
-        )
 
-    def _retraction_sinkhorn(self, point, tangent_vector):
+        # Find maximum step size to preserve non-negativity
+        negative_mask = tangent_vector < 0
+        if np.any(negative_mask):
+            ratios = -point[negative_mask] / tangent_vector[negative_mask]
+            max_alpha = np.min(ratios)
+        else:
+            max_alpha = np.inf
+
+        alpha = min(1, max_alpha) 
+
+        Y = point + alpha * tangent_vector
+        return Y
+
+
+    def _retraction_sinkhorn(self, point, tangent_vector, max_exp_arg=50.0):
         """Exponential-based retraction with Sinkhorn projection."""
         # Clip to prevent overflow
         safe_point = np.maximum(point, self._eps)
 
         # Limit the magnitude to prevent exp overflow (exp(>700) overflows)
         ratio = tangent_vector / safe_point
-        max_ratio = 50.0
-        ratio = np.clip(ratio, -max_ratio, max_ratio)
+        ratio = np.clip(ratio, -max_exp_arg, max_exp_arg)
 
         Y = point * np.exp(ratio)
         # Project to doubly stochastic
