@@ -1,0 +1,39 @@
+# method_resources.yaml
+# PBS resource requirements for each optimization method
+# Adjust these values based on your actual needs
+
+method_resources:
+  QSA:
+    ncpus: 1
+    mem: "2gb"
+    scratch_local: "2gb"
+    walltime: "00:30:00"
+    description: "Quick Simplex Algorithm - Fast single-threaded"
+    
+  InteriorPoint:
+    ncpus: 8
+    mem: "16gb"
+    scratch_local: "8gb"
+    walltime: "04:00:00"
+    description: "Interior Point with IPOPT - CPU intensive"
+    
+  Manifold:
+    ncpus: 8
+    mem: "16gb"
+    scratch_local: "8gb"
+    walltime: "04:00:00"
+    description: "Manifold optimization - Memory intensive"
+    
+  OT4P4AS:
+    ncpus: 4
+    mem: "8gb"
+    scratch_local: "4gb"
+    walltime: "02:00:00"
+    description: "Optimal Transport - Moderate resources"
+    
+  SoftSort:
+    ncpus: 4
+    mem: "8gb"
+    scratch_local: "4gb"
+    walltime: "02:00:00"
+    description: "Soft Sorting - Moderate resources"
