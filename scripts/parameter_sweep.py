@@ -74,6 +74,7 @@ def run_parameter_sweep(
             str(config_file),
             "--data-path",
             str(data_path),
+            "--simulations", "0-2"
         ]
 
         # Show what would be run

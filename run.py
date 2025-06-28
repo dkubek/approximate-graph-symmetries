@@ -15,6 +15,7 @@ import sys
 import time
 import traceback
 import warnings
+import pickle
 from dataclasses import asdict, dataclass, field
 from multiprocessing import Pool, cpu_count
 from pathlib import Path
@@ -347,10 +348,13 @@ def process_simulation(
             return None  # Skip already processed
 
         # Load data
-        data = np.load(instance_file)
+        #data = np.load(instance_file)
+        with open(instance_file, 'rb') as fin:
+            data = pickle.load(fin)
+
 
         # Get adjacency matrix
-        A = data[str(sim_idx)].astype(np.float64)
+        A = data[sim_idx].astype(np.float64)
 
         # Create method instance
         method = create_method_instance(method_name, config)
@@ -464,9 +468,7 @@ def collect_work_items(
         List of (graph_type, instance_file, sim_idx) tuples
     """
     work_items = []
-    # FIXME: RUN ON ALL SIMULATIONS
-    all_simulations = list(range(3))
-    # all_simulations = list(range(39))  # 0 to 38
+    all_simulations = list(range(39))  # 0 to 38
 
     # Determine which simulations to process
     simulations_to_process = simulation_filter if simulation_filter else all_simulations
@@ -480,7 +482,7 @@ def collect_work_items(
             filepath = graph_dir / filename
             if (
                 filepath.is_file()
-                and filepath.suffix == ".npz"
+                and filepath.suffix == ".p"
                 and "allInfo" not in filename
             ):
                 instance_base = filepath.stem
