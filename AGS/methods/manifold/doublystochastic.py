@@ -4,7 +4,7 @@ import logging
 import numpy as np
 from numba import jit
 import scipy.sparse.linalg
-from scipy.sparse.linalg import cg, LinearOperator
+from scipy.sparse.linalg import cg, lsqr, LinearOperator
 from pymanopt.manifolds.manifold import Manifold
 
 
@@ -99,7 +99,8 @@ class DoublyStochastic(Manifold):
 
     def inner_product(self, point, tangent_vector_a, tangent_vector_b):
         """Fisher information metric."""
-        return np.sum(tangent_vector_a * tangent_vector_b / point)
+        safe_point = np.maximum(point, self._eps)
+        return np.sum(tangent_vector_a * tangent_vector_b / safe_point)
 
     def norm(self, point, tangent_vector):
         return np.sqrt(self.inner_product(point, tangent_vector, tangent_vector))
@@ -155,6 +156,7 @@ class DoublyStochastic(Manifold):
 
     def retraction(self, point, tangent_vector):
         """Retract tangent vector to manifold."""
+
         if self._retraction_method == "simple":
             return self._retraction_simple(point, tangent_vector)
         elif self._retraction_method == "sinkhorn":
@@ -221,24 +223,22 @@ class DoublyStochastic(Manifold):
     def _linear_solve_pinv(self, point, b):
         n = self._n
 
-        # Split b into components
-        Z1 = b[:n]  # sum(Z, axis=1)
-        ZT1 = b[n:]  # sum(Z, axis=0)
+        # Unpack the right-hand side vector b
+        Z1 = b[:n]   # Corresponds to Z1 in the paper
+        ZT1 = b[n:]  # Corresponds to Z^T 1 in the paper
 
-        # Compute (I - XX^T)
+        # The system for α is: (I - XX^T)α = Z1 - X(Z^T 1)
+        # The matrix (I - XX^T) is singular, so we must use the pseudoinverse.
         I_minus_XXT = np.eye(n) - point @ point.T
-
-        # Compute alpha using pseudo-inverse
-        # alpha = (I - XX^T)^† (Z1 - X*Z^T*1)
+        
+        # Solve for alpha using pseudoinverse
         alpha = np.linalg.pinv(I_minus_XXT) @ (Z1 - point @ ZT1)
 
-        # Compute beta
+        # Solve for beta using alpha
+        # β = Z^T 1 - X^T α
         beta = ZT1 - point.T @ alpha
 
         return alpha, beta
-
-    def _linear_solve(self, point, b):
-        return self._linear_solve_cg(point, b)
 
     def _linear_solve_cg(self, point, b):
         n = self._n
@@ -263,15 +263,68 @@ class DoublyStochastic(Manifold):
 
         if info != 0:
             # Handle case where the cg solver did not converge
-            # logging.debug(f"Warning: Conjugate Gradient solver did not converge. Info: {info}")
-            # logging.debug(f"Using pseudoinverse to solve the linear system.")
+            logging.debug(f"Warning: Conjugate Gradient solver did not converge. Info: {info}")
+            logging.debug(f"Using pseudoinverse to solve the linear system.")
             return self._linear_solve_pinv(point, b)
 
         # Split the result back into alpha and beta
         alpha = zeta[:n]
         beta = zeta[n:]
 
+        return alpha, beta 
+    
+    def _linear_solve_lsqr(self, point, b):
+        """
+        Solves for α and β using the iterative LSQR algorithm.
+        This is more efficient than pinv for very large, structured systems
+        as it avoids forming the n x n system matrix.
+        """
+        n = self._n
+        Z1 = b[:n]
+        ZT1 = b[n:]
+
+        # Define the matrix-vector product for A = (I - X @ X.T)
+        # This function computes A @ v without forming A.
+        def matvec(v):
+            return v - point @ (point.T @ v)
+
+        # Since A is symmetric, the transpose-vector product is the same.
+        # A_op is a "virtual" representation of our matrix A.
+        A_op = LinearOperator(
+            shape=(n, n),
+            matvec=matvec,
+            rmatvec=matvec,  # rmatvec is for A.T @ v
+            dtype=point.dtype
+        )
+
+        # The right-hand side of the system A @ alpha = b_alpha
+        b_alpha = Z1 - point @ ZT1
+
+        # Use LSQR to solve the least-squares problem for alpha.
+        # We can set a tolerance and iteration limit for performance tuning.
+        # iter_lim is a reasonable default to prevent infinite loops.
+        # atol and btol are standard stopping criteria.
+        lsqr_result = lsqr(
+            A_op, b_alpha, iter_lim=2 * n, atol=1e-8, btol=1e-8
+        )
+        alpha = lsqr_result[0]
+        istop = lsqr_result[1]
+        itn = lsqr_result[2]
+        
+        if istop > 2:
+            logging.debug(
+                f"LSQR solver for projection may not have converged. "
+                f"Stop reason: {istop}, Iterations: {itn}"
+            )
+            
+        # Once alpha is found, beta is computed the same way.
+        beta = ZT1 - point.T @ alpha
+
         return alpha, beta
+
+
+    def _linear_solve(self, point, b):
+        return self._linear_solve_pinv(point, b)
 
     def dist(self, point_a, point_b):
         """Geodesic distance between two points."""
@@ -281,6 +334,11 @@ class DoublyStochastic(Manifold):
     def exp(self, point, tangent_vector):
         """Exponential map (approximation via retraction)."""
         # For this manifold, we use retraction as approximation
+
+        print("exp", tangent_vector)
+        if np.isnan(np.sum(tangent_vector)):
+            import pdb; pdb.set_trace()
+
         return self.retraction(point, tangent_vector)
 
     def log(self, point_a, point_b):

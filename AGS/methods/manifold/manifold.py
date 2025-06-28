@@ -73,7 +73,7 @@ class Manifold:
         c = torch.from_numpy(c.astype(float)).to(device=self.device, dtype=self.dtype)
 
         # Create manifold
-        manifold = DoublyStochastic(n, retraction_method="simple")
+        manifold = DoublyStochastic(n, retraction_method="sinkhorn")
 
         # Define cost function
         @pymanopt.function.pytorch(manifold)
