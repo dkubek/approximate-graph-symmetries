@@ -1,3 +1,27 @@
+"""
+Implements the Manifold Optimization method for the Approximate Symmetry Problem.
+
+This module provides a solver for the Relaxed Approximate Symmetry Problem (rASP)
+by framing it as an unconstrained optimization problem on a Riemannian manifold.
+Instead of treating the constraints of the Birkhoff polytope algebraically, this
+approach embraces the geometry of the set of doubly stochastic matrices.
+
+The interior of the Birkhoff polytope is treated as the Doubly Stochastic
+Manifold, equipped with the Fisher Information Metric. This allows the use of
+standard gradient-based optimization algorithms, such as Steepest Descent or
+Trust Regions, adapted to operate on this curved space. Key operations like
+gradient computation and movement (retraction) are defined by the manifold's
+geometry.
+
+This implementation uses the `pymanopt` library, which automates many of the
+complex manifold operations and integrates with PyTorch for automatic
+differentiation of the objective function.
+
+References:
+    - Boumal, N. (2023). "An introduction to optimization on smooth manifolds."
+    - Douik, A., & Hassibi, B. (2019). "Manifold optimization over the set of
+      doubly stochastic matrices: A second-order geometry."
+"""
 import time
 from typing import Optional
 
@@ -12,6 +36,14 @@ from AGS.methods.manifold.doublystochastic import DoublyStochastic
 
 
 class Manifold:
+    """
+    Solves the rASP using optimization on the Doubly Stochastic Manifold.
+
+    This class provides an interface to the `pymanopt` library to solve the
+    rASP. It sets up the problem by defining the cost function and the
+    Doubly Stochastic manifold, then runs a chosen Riemannian optimizer to
+    find the optimal doubly stochastic matrix.
+    """
     def __init__(
         self,
         optimizer="steepest_descent",
@@ -20,10 +52,17 @@ class Manifold:
         **optimizer_kwargs,
     ):
         """
-        optimizer: Either "steepest_descent" or "trust_regions"
-        max_iterations: Maximum number of iterations
-        verbose: 0 for quiet, 1 for summary, 2 for detailed output
-        **optimizer_kwargs: Additional arguments passed to the optimizer
+        Initializes the Manifold solver.
+
+        Args:
+            optimizer (str): The Riemannian optimizer to use. Supported options
+                are "steepest_descent", "trust_regions", and
+                "conjugate_gradient".
+            max_iter (int): The maximum number of iterations for the optimizer.
+            verbose (int): Verbosity level for the `pymanopt` solver.
+                0 for quiet, 1 for summary, 2 for detailed iteration output.
+            **optimizer_kwargs: Additional keyword arguments to be passed
+                directly to the chosen `pymanopt` optimizer.
         """
 
         self.optimizer = optimizer
@@ -44,18 +83,22 @@ class Manifold:
         P0: Optional[np.ndarray] = None,
     ):
         """
-        Solve the relaxed approximate symmetry problem (rASP).
-
-        Minimizes: -tr(AP A^T P^T - diag(c)P) over doubly stochastic matrices P.
+        Executes the manifold optimization to solve the rASP.
 
         Args:
-            A: Adjacency matrix of the graph (numpy array of shape (n, n))
-            c: Weight vector (numpy array of shape (n,) or scalar)
+            A (np.ndarray): The n x n adjacency matrix of the graph.
+            c (Union[float, np.ndarray]): The penalty parameter for the diagonal
+                (fixed points). Can be a scalar or a vector of length n.
+            P0 (np.ndarray, optional): An initial doubly stochastic matrix to
+                start the optimization. If None, the optimizer's default
+                initialization is used.
 
         Returns:
-            P_opt: Optimal doubly stochastic matrix (numpy array of shape (n, n))
+            dict: A dictionary containing:
+                - "P" (np.ndarray): The optimized doubly stochastic matrix.
+                - "metrics" (dict): A dictionary with performance metrics,
+                  including 'time' and 'iterations'.
         """
-
         n = A.shape[0]
 
         # Handle scalar c
@@ -120,11 +163,11 @@ class Manifold:
         result = opt.run(problem, initial_point=P0)
         end_time = time.time()
 
-        # Convert result back to numpy
+        # Convert the result back to numpy
         P_opt = result.point
 
         return {
-            "P": P_opt, 
+            "P": P_opt,
             "metrics": {
                 "time": end_time - start_time,
                 "iterations": result.iterations

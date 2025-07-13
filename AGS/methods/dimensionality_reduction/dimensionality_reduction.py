@@ -1,3 +1,25 @@
+"""
+Implements a Dimensionality Reduction method for the Approximate Symmetry Problem.
+
+This module provides a solver for the Approximate Symmetry Problem (ASP) based
+on the SoftSort operator. This approach fundamentally changes the optimization
+by reducing the dimensionality of the search space from O(n^2) for a matrix
+to O(n) for a vector.
+
+The core idea is that a permutation can be implicitly defined by the sorting
+order of a vector of n scores. The SoftSort operator provides a differentiable
+relaxation of the `argsort` operation, which maps a score vector to a
+doubly stochastic matrix. As a temperature parameter `tau` approaches zero, this
+matrix converges to the permutation matrix corresponding to the sort order.
+
+This parameterization transforms the highly constrained problem of finding a
+permutation matrix into an unconstrained optimization problem over an n-dimensional
+vector, which can be solved efficiently with standard gradient-based optimizers.
+
+Reference:
+    Prillo, S., & Eisenschlos, J. (2020). "Softsort: A continuous relaxation
+    for the argsort operator". International Conference on Machine Learning.
+"""
 from time import time
 
 import numpy as np
@@ -44,6 +66,16 @@ def soft_sort(s, tau):
 
 
 class DimensionalityReduction:
+    """
+    Solves the Approximate Symmetry Problem using the SoftSort operator.
+
+    This class implements an optimization procedure that finds an approximate
+    symmetry by optimizing a low-dimensional score vector `s`. The `soft_sort`
+    function is used to differentiably map `s` to a doubly stochastic matrix,
+    which is then used to evaluate the ASP objective function. The optimization
+    is performed using AdamW, and an annealing schedule on the temperature `tau`
+    guides the solution towards a discrete permutation.
+    """
     def __init__(
         self,
         max_iter=2000,
@@ -57,17 +89,26 @@ class DimensionalityReduction:
         verbose=1,
     ):
         """
-        max_iterations: Maximum number of iterations
-        initial_tau: Starting temperature for annealing
-        final_tau: Final temperature for annealing
-        annealing_scheme: Method for annealing ("cosine", "linear", or "exponential")
-        decay_rate: Rate of decay for exponential annealing
-        decay_steps: Number of steps for complete annealing
-        learning_rate: Learning rate for optimizer
-        patience: Number of iterations to wait for improvement
-        min_rel_improvement: Minimum relative improvement to reset patience
-        """
+        Initializes the DimensionalityReduction solver.
 
+        Args:
+            max_iter (int): Maximum number of optimization iterations.
+            loss (str): The loss function to use. Either "indefinite" for the
+                trace-based formulation or "convex" for the Frobenius norm
+                formulation.
+            initial_tau (float): The starting temperature for the SoftSort
+                operator. Higher values produce "softer" matrices.
+            final_tau (float): The final temperature for annealing. As tau
+                approaches zero, the output approaches a hard permutation matrix.
+            annealing_scheme (str): The annealing schedule for `tau`. Options
+                are "cosine", "linear", or "exponential".
+            decay_steps (int): The number of iterations over which `tau`
+                anneals from its initial to final value.
+            learning_rate (float): The learning rate for the AdamW optimizer.
+            min_rel_improvement (float): The minimum relative improvement in
+                loss required to update the best solution found so far.
+            verbose (int): Verbosity level. 0 for silent, 1 for progress bar.
+        """
         self.max_iter = max_iter
         self.learning_rate = learning_rate
 
@@ -124,14 +165,18 @@ class DimensionalityReduction:
         c=0.2,
     ):
         """
-        Optimize permutation matrix using soft sort with constraints.
+        Executes the optimization to find an approximate symmetry.
 
         Args:
-            A: Input matrix for optimization
-            c: Penalization parameter for the loss function
+            A (np.ndarray): The n x n adjacency matrix of the graph.
+            c (Union[float, np.ndarray]): The penalty parameter for the diagonal
+                (fixed points). Can be a scalar or a vector of length n.
 
         Returns:
-            Tuple of (best_parameters, best_loss)
+            dict: A dictionary containing:
+                - "P" (np.ndarray): The final n x n permutation matrix.
+                - "metrics" (dict): A dictionary with performance metrics,
+                  including 'time', 'iterations', and 'best_iteration'.
         """
 
         n = A.shape[0]

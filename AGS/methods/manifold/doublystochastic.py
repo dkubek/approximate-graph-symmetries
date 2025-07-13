@@ -1,3 +1,25 @@
+"""
+Defines the manifold of doubly stochastic matrices.
+
+This module provides the geometric definition of the manifold of n x n doubly
+stochastic matrices, which is the set of matrices with positive entries where
+each row and column sums to one. This manifold is the relative interior of the
+Birkhoff polytope.
+
+The implementation includes the definition of the manifold's tangent space,
+the Fisher Information Metric, and the necessary geometric operations for
+optimization, such as projection, retraction, and gradient computation.
+These tools enable the use of Riemannian optimization algorithms on this space.
+
+This implementation is adapted from the MATLAB `manopt` toolbox and the theoretical
+framework described in the paper "Manifold optimization over the set of doubly
+stochastic matrices: A second-order geometry" by Douik and Hassibi.
+
+References:
+    - Douik, A., & Hassibi, B. (2019). "Manifold optimization over the set
+      of doubly stochastic matrices: A second-order geometry."
+    - The `manopt` (MATLAB) toolbox: https://github.com/NicolasBoumal/manopt
+"""
 from typing import Optional
 
 import logging
@@ -39,26 +61,31 @@ def _doubly_stochastic(X, tol=1e-8, max_iters=100, eps=1e-8):
 
 
 class DoublyStochastic(Manifold):
-    r"""Manifold of doubly-stochastic matrices with positive entries.
+    r"""
+    Manifold of n x n doubly stochastic matrices with positive entries.
 
-    The manifold consists of n×n matrices X with positive entries such that each
-    row and column sums to 1. The manifold has dimension (n-1)².
+    This manifold consists of matrices where all entries are positive, and each
+    row and column sums to 1. It represents the relative interior of the
+    Birkhoff polytope and has a dimension of (n-1)².
 
-    The Riemannian metric is the Fisher information metric:
-        <U, V>_X = sum_ij (U_ij * V_ij / X_ij)
-
-    Args:
-        n: Size of the square matrices.
-        retraction_method: Method for retraction. Options are:
-            - "simple": First-order retraction X + eta
-            - "sinkhorn": Exponential-based with Sinkhorn projection (default)
-        max_sinkhorn_iters: Maximum iterations for Sinkhorn-Knopp algorithm.
-        pcg_threshold: Use PCG solver when n exceeds this threshold.
+    The Riemannian metric used is the Fisher information metric:
+    `<U, V>_X = sum_ij (U_ij * V_ij / X_ij)`
 
     Note:
-        The implementation follows the embedded geometry described in [Douik2018]_.
-        The retraction is only valid in a neighborhood of the current point where
-        all entries remain positive.
+        This implementation is adapted from the MATLAB `manopt` toolbox, available
+        at https://github.com/NicolasBoumal/manopt, and follows the embedded
+        geometry described in [Douik2018]. The retraction is only valid in a
+        neighborhood of the current point where all entries remain positive.
+
+    Args:
+        n (int): The size of the square matrices.
+        retraction_method (str): The retraction method to use. Options are:
+            "simple" for a first-order additive retraction or "sinkhorn" for an
+            exponential-based retraction with Sinkhorn projection.
+        max_sinkhorn_iters (int, optional): The maximum number of iterations for the
+            Sinkhorn-Knopp algorithm used in retractions.
+        pcg_threshold (int): A threshold for `n` above which a PCG solver is
+            used for linear systems.
 
     References:
         .. [Douik2018] A. Douik and B. Hassibi, "Manifold Optimization Over the Set
@@ -175,7 +202,7 @@ class DoublyStochastic(Manifold):
         else:
             max_alpha = np.inf
 
-        alpha = min(1, max_alpha) 
+        alpha = min(1, max_alpha)
 
         Y = point + alpha * tangent_vector
         return Y
@@ -230,7 +257,7 @@ class DoublyStochastic(Manifold):
         # The system for α is: (I - XX^T)α = Z1 - X(Z^T 1)
         # The matrix (I - XX^T) is singular, so we must use the pseudoinverse.
         I_minus_XXT = np.eye(n) - point @ point.T
-        
+
         # Solve for alpha using pseudoinverse
         alpha = np.linalg.pinv(I_minus_XXT) @ (Z1 - point @ ZT1)
 
@@ -271,8 +298,8 @@ class DoublyStochastic(Manifold):
         alpha = zeta[:n]
         beta = zeta[n:]
 
-        return alpha, beta 
-    
+        return alpha, beta
+
     def _linear_solve_lsqr(self, point, b):
         """
         Solves for α and β using the iterative LSQR algorithm.
@@ -310,13 +337,13 @@ class DoublyStochastic(Manifold):
         alpha = lsqr_result[0]
         istop = lsqr_result[1]
         itn = lsqr_result[2]
-        
+
         if istop > 2:
             logging.debug(
                 f"LSQR solver for projection may not have converged. "
                 f"Stop reason: {istop}, Iterations: {itn}"
             )
-            
+
         # Once alpha is found, beta is computed the same way.
         beta = ZT1 - point.T @ alpha
 

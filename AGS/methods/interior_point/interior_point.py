@@ -1,3 +1,26 @@
+"""
+Implements the Interior-Point Method (IPM) for the Approximate Symmetry Problem.
+
+This module provides a solver for the Relaxed Approximate Symmetry Problem (rASP)
+by formulating it as a general nonlinear programming problem and solving it with
+a primal-dual interior-point method. This approach is considered a second-order
+method because it utilizes Hessian (curvature) information of the objective
+function to compute search directions, potentially leading to faster and more
+robust convergence compared to first-order methods.
+
+The implementation serves as a wrapper around the `cyipopt` library, which is a
+Python binding for the powerful IPOPT (Interior Point OPTimizer) software package.
+The rASP is defined with its objective function, constraints (row/column sums
+equal to 1), and bounds (0 <= P_ij <= 1), and IPOPT handles the optimization.
+
+The key advantage is leveraging a mature, highly-optimized solver capable of
+handling non-convex problems and exploiting sparsity in the problem's derivatives.
+
+Reference:
+    Wächter, A., & Biegler, L. T. (2006). "On the implementation of an
+    interior-point filter line-search algorithm for large-scale nonlinear
+    programming." Mathematical programming.
+"""
 import time
 
 import cyipopt
@@ -15,10 +38,13 @@ from AGS.initialization import (
 
 class InteriorPoint:
     """
-    Minimizes: -tr(APA^T P^T) + tr(diag(c)P)
-    Subject to: P1 = 1, P^T1 = 1, 0 <= P <= 1
-    """
+    Solves the rASP using a primal-dual interior-point method via IPOPT.
 
+    This class encapsulates the rASP formulation required by IPOPT. It defines
+    the objective function, gradient, constraints, Jacobian, and Hessian, and
+    uses the `cyipopt` library to find a solution. The method operates on a
+    vectorized representation of the permutation matrix P.
+    """
     def __init__(
         self,
         max_iter=1000,
@@ -27,16 +53,17 @@ class InteriorPoint:
         verbose=True,
     ):
         """
-        Initialize the QSA problem.
+        Initializes the InteriorPoint solver.
 
-        Parameters:
-        -----------
-        A : array_like or sparse matrix
-            Adjacency matrix (n x n)
-        c : scalar or array_like
-            Penalty parameter (scalar or vector of length n)
+        Args:
+            max_iter (int): Maximum number of iterations for the IPOPT solver.
+            tol (float): Convergence tolerance for the IPOPT solver.
+            rng (Union[int, np.random.RandomState, np.random.Generator], optional):
+                A seed or random number generator for reproducible
+                initializations. Defaults to None.
+            verbose (bool): If True, prints IPOPT's optimization progress.
+                If False, suppresses most of the solver's output.
         """
-
         self.rng = check_random_state(rng)
         self.max_iter = max_iter
         self.tol = tol
@@ -78,15 +105,15 @@ class InteriorPoint:
     def _setup_hessian_sparsity(self):
         """Compute sparsity pattern and values for the constant Hessian."""
         n = self._n
-        
+
         hess_sparse = sp.kron(self.A, self.A) + sp.kron(self.A, self.A)
-        
+
         # Convert to COO format for easy indexing
         hess_coo = hess_sparse.tocoo()
-        
+
         # Extract lower triangular part
         lower_mask = hess_coo.row >= hess_coo.col
-        
+
         self.hess_rows = hess_coo.row[lower_mask]
         self.hess_cols = hess_coo.col[lower_mask]
         self.hess_values = hess_coo.data[lower_mask]
@@ -167,29 +194,22 @@ class InteriorPoint:
         P0="random_doubly_stochastic",
     ):
         """
-        Solve the QSA problem using IPOPT.
+        Solve the rASP using the IPOPT solver.
 
-        Parameters:
-        -----------
-        P0 : array_like, optional
-            Initial doubly stochastic matrix
-        init : str
-            Initialization method if P0 is None
-        rng : RandomState, optional
-            Random number generator
-        max_iter : int
-            Maximum number of iterations
-        tol : float
-            Convergence tolerance
-        verbose : bool
-            Print optimization progress
+        Args:
+            A (np.ndarray): The n x n adjacency matrix of the graph.
+            c (Union[float, np.ndarray]): The penalty parameter for the diagonal
+                (fixed points). Can be a scalar or a vector of length n.
+            P0 (Union[str, np.ndarray]): The initial doubly stochastic matrix P.
+                Can be a specific numpy array or a string specifying an
+                initialization method: "barycenter", "random_permutation", or
+                "random_doubly_stochastic".
 
         Returns:
-        --------
-        P : ndarray
-            Optimized doubly stochastic matrix
-        info : dict
-            Optimization information
+            dict: A dictionary containing:
+                - "P" (np.ndarray): The optimized doubly stochastic matrix.
+                - "metrics" (dict): A dictionary with performance metrics,
+                  including 'time' and 'iterations'.
         """
 
         # Store problem data
@@ -280,7 +300,7 @@ class InteriorPoint:
         P_opt = x_opt.reshape((n, n))
 
         return {
-            "P": P_opt, 
+            "P": P_opt,
             "metrics": {
                 "time": end_time - start_time,
                 "iterations": self._iteration_count

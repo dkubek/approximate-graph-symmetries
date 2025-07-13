@@ -1,3 +1,26 @@
+"""
+Implements the Orthogonal Relaxation (OR) method for the Approximate Symmetry Problem.
+
+This module provides a solver for the Approximate Symmetry Problem (ASP) by
+relaxing the discrete set of permutation matrices to the non-convex manifold of
+orthogonal matrices. This approach offers a significant reduction in the number
+of optimization parameters compared to methods operating on the Birkhoff polytope.
+
+The core of this method is the OT4P (Orthogonal Group-based Transformation for
+Permutation Relaxation) framework, which provides a differentiable mapping from
+an unconstrained vector space to the set of permutation matrices. The optimization
+is performed using gradient-based methods (AdamW) with a temperature parameter
+that controls the interpolation between the orthogonal group and the permutation
+matrices, guided by an annealing schedule.
+
+The module supports both the indefinite and convex formulations of the relaxed ASP
+objective function.
+
+Reference:
+    Guo, Y., Zhu, H., Wu, T., et al. (2024). "OT4P: Unlocking Effective
+    Orthogonal Group Path for Permutation Relaxation". Advances in Neural
+    Information Processing Systems.
+"""
 from time import time
 
 import numpy as np
@@ -10,6 +33,16 @@ from .OT4P.ot4p import OT4P
 
 
 class OrthogonalRelaxation:
+    """
+    Solves the Approximate Symmetry Problem using Orthogonal Relaxation.
+
+    This class implements an optimization procedure for the ASP by relaxing the
+    search space from permutation matrices to the orthogonal group. It utilizes
+    the OT4P framework to parameterize the problem, enabling unconstrained
+    optimization with gradient-based methods in PyTorch. The method iteratively
+    refines a solution while an annealing schedule guides the relaxation towards
+    a discrete permutation matrix.
+    """
     def __init__(
             self,
             max_iter=3000,
@@ -23,15 +56,25 @@ class OrthogonalRelaxation:
             verbose=1,
     ):
         """
-        max_iterations: Maximum number of iterations
-        initial_tau: Starting temperature for annealing
-        final_tau: Final temperature for annealing
-        annealing_scheme: Method for annealing ("cosine", "linear", or "exponential")
-        decay_rate: Rate of decay for exponential annealing
-        decay_steps: Number of steps for complete annealing
-        learning_rate: Learning rate for optimizer
-        patience: Number of iterations to wait for improvement
-        min_rel_improvement: Minimum relative improvement to reset patience
+        Initializes the OrthogonalRelaxation solver.
+
+        Args:
+            max_iter (int): Maximum number of optimization iterations.
+            initial_tau (float): The starting temperature for annealing. Higher
+                values correspond to a weaker approximation of permutations.
+            final_tau (float): The final temperature for annealing.
+            loss (str): The loss function to use. Either "indefinite" for the
+                trace-based formulation or "convex" for the Frobenius norm
+                formulation.
+            annealing_scheme (str): The annealing schedule for the temperature
+                tau. Options are "cosine", "linear", or "exponential".
+            decay_steps (int): The number of iterations over which tau anneals
+                from its initial to final value.
+            learning_rate (float): The learning rate for the AdamW optimizer.
+            min_rel_improvement (float): The minimum relative improvement in
+                loss required to update the best solution found so far. Used
+                for early stopping.
+            verbose (int): Verbosity level. 0 for silent, 1 for progress bar.
         """
 
         self.max_iter = max_iter
@@ -57,10 +100,6 @@ class OrthogonalRelaxation:
         self.device = "cpu"
         if self.verbose:
             print(f"Using {self.device} device")
-
-    # def loss(self, A, P, c):
-    #    return self._loss_trace(A, P, c)
-    #    #return self._loss_norm(A, P, c)
 
     def _loss_trace(self, A, P, c):
         quadratic_term = -torch.trace(A @ P @ A.transpose(-2, -1) @ P.transpose(-2, -1))
@@ -92,14 +131,18 @@ class OrthogonalRelaxation:
             c=0.2,
     ):
         """
-        Optimize permutation matrix using soft sort with constraints.
+        Executes the optimization to find an approximate symmetry.
 
         Args:
-            A: Input matrix for optimization
-            c: Penalization parameter for the loss function
+            A (np.ndarray): The n x n adjacency matrix of the graph.
+            c (Union[float, np.ndarray]): The penalty parameter for the diagonal
+                (fixed points). Can be a scalar or a vector of length n.
 
         Returns:
-            Tuple of (best_parameters, best_loss)
+            dict: A dictionary containing:
+                - "P" (np.ndarray): The optimized n x n permutation matrix.
+                - "metrics" (dict): A dictionary with performance metrics,
+                  including 'time', 'iterations', and 'best_iteration'.
         """
 
         n = A.shape[0]
@@ -134,6 +177,7 @@ class OrthogonalRelaxation:
         iterations_performed = 0
 
         for i in pbar:
+            iterations_performed = i + 1
             current_tau = get_annealing_tau(
                 i,
                 self.decay_steps,
