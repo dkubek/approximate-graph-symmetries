@@ -108,9 +108,9 @@ class Config:
     # Method configurations
     InteriorPoint: InteriorPointConfig = field(default_factory=InteriorPointConfig)
     Manifold: ManifoldConfig = field(default_factory=ManifoldConfig)
-    OT4P4AS: OrthogonalRelaxationConfig = field(default_factory=OrthogonalRelaxationConfig)
+    OrthogonalRelaxation: OrthogonalRelaxationConfig = field(default_factory=OrthogonalRelaxationConfig)
     QSA: QSAConfig = field(default_factory=QSAConfig)
-    SoftSort: DimensionalityReductionConfig = field(default_factory=DimensionalityReductionConfig)
+    DimensionalityReduction: DimensionalityReductionConfig = field(default_factory=DimensionalityReductionConfig)
 
 
 # ============================================================================
@@ -265,11 +265,11 @@ def create_method_instance(method_name: str, config: Config) -> Any:
         return InteriorPoint(**asdict(method_config))
     elif method_name == "Manifold":
         return Manifold(**asdict(method_config))
-    elif method_name == "OT4P4AS":
+    elif method_name == "OrthogonalRelaxation":
         return OrthogonalRelaxation(**asdict(method_config))
     elif method_name == "QSA":
         return QSA(**asdict(method_config))
-    elif method_name == "SoftSort":
+    elif method_name == "DimensionalityReduction":
         return DimensionalityReduction(**asdict(method_config))
     else:
         raise ValueError(f"Unknown method: {method_name}")
@@ -616,7 +616,7 @@ def load_config(config_file: Optional[Path]) -> Config:
                 setattr(config, key, config_dict[key])
 
         # Load method configs
-        for method_name in ["InteriorPoint", "Manifold", "OT4P4AS", "QSA", "SoftSort"]:
+        for method_name in ["InteriorPoint", "Manifold", "OrthogonalRelaxation", "QSA", "DimensionalityReduction"]:
             if method_name in config_dict:
                 method_config_class = globals()[f"{method_name}Config"]
                 method_config = method_config_class(**config_dict[method_name])
@@ -670,7 +670,7 @@ def main():
     )
 
     # Method selection
-    all_methods = ["InteriorPoint", "Manifold", "OT4P4AS", "QSA", "SoftSort"]
+    all_methods = ["InteriorPoint", "Manifold", "OrthogonalRelaxation", "QSA", "DimensionalityReduction"]
     parser.add_argument(
         "--methods",
         nargs="+",

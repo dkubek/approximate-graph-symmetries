@@ -83,10 +83,10 @@ first 3 simulations of all available instances:
 
 ```bash
 python run.py \
-    --methods InteriorPoint \
+    --methods QSA \
     --simulations 0-2 \
     --config config/config.yaml \
-    --data-path data/pidnebesna \
+    --data-path data/example \
     --results-path results
 ```
 
@@ -117,16 +117,16 @@ This command runs the same experiment as the local example above, but inside the
 
 ```bash
 docker run --rm \
-    -v "$PWD/data/pidnebesna:/app/data/pidnebesna" \
+    -v "$PWD/data:/app/data" \
     -v "$PWD/results:/app/results" \
     ags-optimizer \
     run.py \
         --methods QSA \
         --simulations 0-2 \
-        --data-path data/pidnebesna \
+        --data-path data/example \
         --results-path results
 ```
-- `-v "$PWD/data/pidnebesna:/app/data/pidnebesna"`: Mounts your local data directory into the container.
+- `-v "$PWD/data:/app/data"`: Mounts your local data directory into the container.
 - `-v "$PWD/results:/app/results"`: Mounts your local results directory so that output files are saved to your host machine.
 - `--rm`: Automatically removes the container when it exits.
 
