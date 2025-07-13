@@ -6,18 +6,52 @@ from tqdm import tqdm
 
 from AGS.annealing import get_annealing_tau
 
-from .OT4P.ot4p import OT4P
+
+def soft_sort(s, tau):
+    """
+    PyTorch implementation of SoftSort function for 1D tensors.
+
+    Args:
+        s: Input tensor of shape (1,)
+        tau: Temperature parameter for SoftSort
+
+    Returns:
+        P_hat: Soft permutation matrix of shape (n, n)
+    """
+
+    # Check that input is 1D
+    if s.dim() != 1:
+        raise ValueError(
+            f"Expected 1D tensor of shape [sequence_length,], got tensor with {s.dim()} dimensions"
+        )
+
+    # Sort the tensor in descending order
+    s_sorted, _ = torch.sort(s, dim=0, descending=True)
+
+    # Reshape tensors for computing pairwise distances
+    # Convert s to shape [sequence_length, 1] and s_sorted to shape [1, sequence_length]
+    s_col = s.unsqueeze(1)  # Shape: [sequence_length, 1]
+    s_sorted_row = s_sorted.unsqueeze(0)  # Shape: [1, sequence_length]
+
+    # Compute pairwise distances
+    # Broadcasting will create a tensor of shape [sequence_length, sequence_length]
+    pairwise_distances = -torch.abs(s_col - s_sorted_row)
+
+    # Apply softmax along the last dimension (dim=1 for a 2D tensor)
+    P_hat = torch.nn.functional.softmax(pairwise_distances / tau, dim=1)
+
+    return P_hat
 
 
-class OT4P4AS:
+class DimensionalityReduction:
     def __init__(
         self,
-        max_iter=3000,
-        initial_tau=0.7,
-        final_tau=0.5,
+        max_iter=2000,
         loss="indefinite",
-        annealing_scheme="exponential",
-        decay_steps=5000,
+        initial_tau=1,
+        final_tau=1e-6,
+        annealing_scheme="cosine",
+        decay_steps=None,
         learning_rate=1e-1,
         min_rel_improvement=1e-4,
         verbose=1,
@@ -54,13 +88,13 @@ class OT4P4AS:
         self.verbose = verbose
 
         self.dtype = torch.float
-        self.device = "cpu"
+        self.device = (
+            torch.accelerator.current_accelerator().type
+            if torch.accelerator.is_available()
+            else "cpu"
+        )
         if self.verbose:
             print(f"Using {self.device} device")
-
-    # def loss(self, A, P, c):
-    #    return self._loss_trace(A, P, c)
-    #    #return self._loss_norm(A, P, c)
 
     def _loss_trace(self, A, P, c):
         quadratic_term = -torch.trace(A @ P @ A.transpose(-2, -1) @ P.transpose(-2, -1))
@@ -68,8 +102,7 @@ class OT4P4AS:
         diag_elements = torch.diagonal(P, dim1=-2, dim2=-1)
 
         # Classic penalty
-        positive_diags = torch.pow(diag_elements, 2)
-        penalty = torch.sum(c * positive_diags)
+        penalty = torch.sum(c * diag_elements)
 
         return quadratic_term + penalty
 
@@ -81,8 +114,7 @@ class OT4P4AS:
         diag_elements = torch.diagonal(P, dim1=-2, dim2=-1)
 
         # Classic penalty
-        positive_diags = torch.pow(diag_elements, 2)
-        penalty = torch.sum(c * positive_diags)
+        penalty = torch.sum(c * diag_elements)
 
         return quadratic_term + penalty
 
@@ -118,24 +150,30 @@ class OT4P4AS:
         A = torch.from_numpy(A.astype(float)).to(device=self.device, dtype=self.dtype)
         c = torch.from_numpy(c.astype(float)).to(device=self.device, dtype=self.dtype)
 
-        model = OT4P(n).to(device=self.device, dtype=self.dtype)
-        weightP = torch.nn.Parameter(
-            torch.rand_like(A, device=self.device, dtype=self.dtype), requires_grad=True
+        # Initialize s on the unit sphere
+        s = torch.nn.Parameter(
+            torch.nn.functional.normalize(
+                torch.rand(n, device=self.device, dtype=self.dtype), dim=0
+            ),
+            requires_grad=True,
         )
-        optimizer = torch.optim.AdamW([weightP], lr=self.learning_rate)
+        optimizer = torch.optim.AdamW([s], lr=self.learning_rate)
 
         # Initialize tracking variables
         best_loss = float("inf")
-        best_weight = weightP.clone().detach()
+        best_s = s
         best_iteration = 0
 
         pbar = tqdm(range(self.max_iter), disable=(self.verbose < 1))
         start_time = time()
         iterations_performed = 0
 
-        for i in pbar:
+        for iteration in pbar:
+            iterations_performed = iteration + 1
+
+            # Compute current tau using the annealing function
             current_tau = get_annealing_tau(
-                i,
+                iteration,
                 self.decay_steps,
                 self.initial_tau,
                 self.final_tau,
@@ -144,31 +182,28 @@ class OT4P4AS:
 
             # Training step
             optimizer.zero_grad()
-            perm_matrix = model(weightP, tau=current_tau)
-            loss_val = self.loss(A, perm_matrix, c)
-            loss_val.backward()
+            perm_matrix = soft_sort(s, tau=current_tau)
+            loss_train = self.loss(A, perm_matrix, c=c)
+            loss_train.backward()
             optimizer.step()
 
             # Compute validation loss
             with torch.no_grad():
-                perm_matrix_val = model(weightP, tau=0)
-                loss_val = self.loss(A, perm_matrix_val, c)
+                perm_matrix_val = soft_sort(s, tau=1e-8)
+                loss_val = self.loss(A, perm_matrix_val, c=0)
 
             # Check for improvement
             if loss_val < best_loss * (1 - self.min_rel_improvement):
                 best_loss = loss_val
-                best_weight = weightP.clone().detach()
-                best_iteration = i + 1
-
-            # Update model base
-            model.update_base(weightP)
+                best_s = s.clone().detach()
+                best_iteration = iteration + 1
 
             # Update progress bar
             pbar.set_description(f"Loss: {loss_val.item():.6f}, Tau: {current_tau:.4f}")
 
         end_time = time()
 
-        P_opt = model(best_weight, tau=0).cpu().numpy()
+        P_opt = soft_sort(best_s, tau=1e-8).cpu().numpy()
 
         return {
             "P": P_opt,

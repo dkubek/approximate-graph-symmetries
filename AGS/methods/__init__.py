@@ -1,5 +1,5 @@
 from .interior_point import InteriorPoint
 from .manifold import Manifold
-from .ot4p import OT4P4AS
+from .orthogonal_relaxation import OrthogonalRelaxation
 from .qsa import QSA
-from .softsort import SoftSort
+from .dimensionality_reduction import DimensionalityReduction

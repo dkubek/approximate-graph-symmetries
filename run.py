@@ -10,25 +10,20 @@ import argparse
 import json
 import logging
 import os
-import re
-import sys
-import time
+import pickle
 import traceback
 import warnings
-import pickle
 from dataclasses import asdict, dataclass, field
-from multiprocessing import Pool, cpu_count
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
-import torch
 import yaml
 from scipy.optimize import linear_sum_assignment
 from tqdm import tqdm
 
 # Import optimization methods
-from AGS.methods import OT4P4AS, QSA, InteriorPoint, Manifold, SoftSort
+from AGS.methods import OrthogonalRelaxation, QSA, InteriorPoint, Manifold, DimensionalityReduction
 
 # Suppress warnings
 warnings.filterwarnings("ignore")
@@ -67,8 +62,8 @@ class ManifoldConfig(BaseConfig):
 
 
 @dataclass
-class OT4P4ASConfig(BaseConfig):
-    """Configuration for OT4P method."""
+class OrthogonalRelaxationConfig(BaseConfig):
+    """Configuration for OR method."""
 
     max_iter: int = 3000
     initial_tau: float = 0.7
@@ -89,8 +84,8 @@ class QSAConfig(BaseConfig):
 
 
 @dataclass
-class SoftSortConfig(BaseConfig):
-    """Configuration for SoftSort method."""
+class DimensionalityReductionConfig(BaseConfig):
+    """Configuration for DR method."""
 
     max_iter: int = 2000
     initial_tau: float = 1.0
@@ -113,9 +108,9 @@ class Config:
     # Method configurations
     InteriorPoint: InteriorPointConfig = field(default_factory=InteriorPointConfig)
     Manifold: ManifoldConfig = field(default_factory=ManifoldConfig)
-    OT4P4AS: OT4P4ASConfig = field(default_factory=OT4P4ASConfig)
+    OT4P4AS: OrthogonalRelaxationConfig = field(default_factory=OrthogonalRelaxationConfig)
     QSA: QSAConfig = field(default_factory=QSAConfig)
-    SoftSort: SoftSortConfig = field(default_factory=SoftSortConfig)
+    SoftSort: DimensionalityReductionConfig = field(default_factory=DimensionalityReductionConfig)
 
 
 # ============================================================================
@@ -143,9 +138,9 @@ def format_value_for_dirname(value: Any) -> str:
                 base, exp = exp_str.split("e" if "e" in exp_str else "E")
                 base = base.rstrip("0").rstrip(".")
                 exp_str = (
-                    base
-                    + ("em" if "em" in exp_str else "ep")
-                    + exp.split("m" if "m" in exp else "p")[1]
+                        base
+                        + ("em" if "em" in exp_str else "ep")
+                        + exp.split("m" if "m" in exp else "p")[1]
                 )
             return exp_str
         else:
@@ -161,7 +156,7 @@ def format_value_for_dirname(value: Any) -> str:
 
 
 def get_important_params(
-    method_name: str, method_config: Any, c: float
+        method_name: str, method_config: Any, c: float
 ) -> Dict[str, Any]:
     """
     Get important parameters for a given method.
@@ -187,7 +182,7 @@ def get_important_params(
                 "max_iter": method_config.max_iter,
             }
         )
-    elif method_name == "OT4P4AS":
+    elif method_name == "OrthogonalRelaxation":
         params.update(
             {
                 "max_iter": method_config.max_iter,
@@ -204,7 +199,7 @@ def get_important_params(
                 "tol": method_config.tol,
             }
         )
-    elif method_name == "SoftSort":
+    elif method_name == "DimensionalityReduction":
         params.update(
             {
                 "max_iter": method_config.max_iter,
@@ -240,7 +235,7 @@ def get_param_dirname(method_name: str, method_config: Any, config: Config) -> s
 
 
 def save_config_json(
-    base_path: Path, method_name: str, method_config: Any, config: Config
+        base_path: Path, method_name: str, method_config: Any, config: Config
 ) -> None:
     """
     Save complete configuration to JSON file.
@@ -271,11 +266,11 @@ def create_method_instance(method_name: str, config: Config) -> Any:
     elif method_name == "Manifold":
         return Manifold(**asdict(method_config))
     elif method_name == "OT4P4AS":
-        return OT4P4AS(**asdict(method_config))
+        return OrthogonalRelaxation(**asdict(method_config))
     elif method_name == "QSA":
         return QSA(**asdict(method_config))
     elif method_name == "SoftSort":
-        return SoftSort(**asdict(method_config))
+        return DimensionalityReduction(**asdict(method_config))
     else:
         raise ValueError(f"Unknown method: {method_name}")
 
@@ -284,7 +279,7 @@ def create_method_instance(method_name: str, config: Config) -> Any:
 # Processing Functions
 # ============================================================================
 def process_single_run(
-    A: np.ndarray, method: Any, c: float
+        A: np.ndarray, method: Any, c: float
 ) -> Tuple[np.ndarray, np.ndarray, Dict[str, Any]]:
     """
     Process a single optimization run.
@@ -311,7 +306,7 @@ def process_single_run(
 
 
 def process_simulation(
-    args: Tuple[str, str, Path, int, Config, Path, bool],
+        args: Tuple[str, str, Path, int, Config, Path, bool],
 ) -> Optional[Dict[str, Any]]:
     """
     Process a single simulation.
@@ -348,10 +343,9 @@ def process_simulation(
             return None  # Skip already processed
 
         # Load data
-        #data = np.load(instance_file)
+        # data = np.load(instance_file)
         with open(instance_file, 'rb') as fin:
             data = pickle.load(fin)
-
 
         # Get adjacency matrix
         A = data[sim_idx].astype(np.float64)
@@ -452,9 +446,9 @@ def save_single_result(result_data: Dict[str, Any], result_base: Path) -> None:
 # Main Orchestration
 # ============================================================================
 def collect_work_items(
-    data_path: Path,
-    instance_filter: Optional[List[str]] = None,
-    simulation_filter: Optional[List[int]] = None,
+        data_path: Path,
+        instance_filter: Optional[List[str]] = None,
+        simulation_filter: Optional[List[int]] = None,
 ) -> List[Tuple[str, Path, int]]:
     """
     Collect all work items (instance, simulation pairs) from data directory.
@@ -481,9 +475,9 @@ def collect_work_items(
         for filename in os.listdir(graph_dir):
             filepath = graph_dir / filename
             if (
-                filepath.is_file()
-                and filepath.suffix == ".p"
-                and "allInfo" not in filename
+                    filepath.is_file()
+                    and filepath.suffix == ".p"
+                    and "allInfo" not in filename
             ):
                 instance_base = filepath.stem
 
@@ -499,14 +493,14 @@ def collect_work_items(
 
 
 def run_optimization(
-    methods: List[str],
-    data_path: Path,
-    results_path: Path,
-    config: Config,
-    instance_filter: Optional[List[str]] = None,
-    simulation_filter: Optional[List[int]] = None,
-    force_recompute: bool = False,
-    dry_run: bool = False,
+        methods: List[str],
+        data_path: Path,
+        results_path: Path,
+        config: Config,
+        instance_filter: Optional[List[str]] = None,
+        simulation_filter: Optional[List[int]] = None,
+        force_recompute: bool = False,
+        dry_run: bool = False,
 ) -> None:
     """Run optimization for specified methods."""
 

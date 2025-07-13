@@ -1,0 +1,114 @@
+#!/bin/bash
+# PBS script for METHOD_NAME parameter sweep
+# Auto-generated from template - DO NOT EDIT DIRECTLY
+
+#PBS -N AGS_<METHOD_NAME>
+#PBS -l select=1:ncpus=<NCPUS>:mem=<MEM>:scratch_local=<SCRATCH>
+#PBS -l walltime=<WALLTIME>
+#PBS -J <START_INDEX>-<END_INDEX>
+#PBS -o <LOGS_DIR>/<METHOD_NAME>_job_^array_index^.out
+#PBS -e <LOGS_DIR>/<METHOD_NAME>_job_^array_index^.err
+#PBS -m ae
+
+# Exit immediately if a command exits with a non-zero status
+set -eo pipefail
+
+# Pre-flight checks
+[[ -n "$SCRATCHDIR" ]] || {
+    echo >&2 "FATAL: Variable SCRATCHDIR is not set. This script must be run via qsub."
+    exit 1
+}
+[[ -n "$PBS_ARRAY_INDEX" ]] || {
+    echo >&2 "FATAL: Variable PBS_ARRAY_INDEX is not set. This script must be submitted as a job array."
+    exit 1
+}
+
+# Path definitions
+STORAGE="<STORAGE_PATH>"
+PROJECT_DIR="$STORAGE/ags"
+SWEEP_DIR="$PROJECT_DIR/<SWEEP_DIR>"
+CONTAINER="$PROJECT_DIR/ags-optimizer.sif"
+DATA_DIR="$PROJECT_DIR/data/pidnebesna"
+RESULTS_BASE="$PROJECT_DIR/results"
+
+# Method-specific parameters file
+PARAMS_FILE="$SWEEP_DIR/<METHOD_NAME>_parameters.txt"
+
+# Local (scratch) paths
+LOCAL_CONFIG_NAME="config.yaml"
+LOCAL_DATA_DIR="data"
+
+echo "============================================"
+echo "AGS Parameter Sweep - <METHOD_NAME>"
+echo "============================================"
+echo "Job Array Index: $PBS_ARRAY_INDEX"
+echo "Node: $(hostname)"
+echo "Start Time: $(date)"
+echo "Resources: <NCPUS> CPUs, <MEM> RAM, <WALLTIME> walltime"
+echo "============================================"
+
+# Setup scratch directory
+cd "$SCRATCHDIR" || {
+    echo >&2 "FATAL: Could not change to scratch directory."
+    exit 1
+}
+
+echo "Setting up scratch directory..."
+rsync -a "$DATA_DIR/" "$LOCAL_DATA_DIR/" || {
+    echo >&2 "FATAL: Failed to copy data."
+    exit 2
+}
+
+cp "$PARAMS_FILE" . || {
+    echo >&2 "FATAL: Could not copy parameters file."
+    exit 2
+}
+
+# Get parameters for this job
+params=$(sed -n "${PBS_ARRAY_INDEX}p" $(basename "$PARAMS_FILE") || true)
+if [[ -z "$params" ]]; then
+    echo >&2 "FATAL: No parameters found for array index ${PBS_ARRAY_INDEX}"
+    exit 3
+fi
+
+# Parse parameters
+read -r job_id method config_file simulation_range <<< "$params"
+
+echo "Job ID: $job_id"
+echo "Method: $method (should be <METHOD_NAME>)"
+echo "Config: $config_file"
+echo "Simulations: $simulation_range"
+
+# Verify method matches
+if [[ "$method" != "<METHOD_NAME>" ]]; then
+    echo >&2 "ERROR: Method mismatch. Expected <METHOD_NAME>, got $method"
+    exit 4
+fi
+
+# Copy config file
+cp "$SWEEP_DIR/configs/$config_file" "$LOCAL_CONFIG_NAME" || {
+    echo >&2 "FATAL: Could not copy config file: $config_file"
+    exit 2
+}
+
+# Set up environment
+export SINGULARITY_BINDPATH="$SCRATCHDIR,$RESULTS_BASE"
+export PYTHONUNBUFFERED=1
+
+# Execute the computation
+echo "Starting computation..."
+singularity exec "$CONTAINER" python3.11 /app/run.py \
+    --methods "$method" \
+    --config "$LOCAL_CONFIG_NAME" \
+    --data-path "./$LOCAL_DATA_DIR" \
+    --results-path "$RESULTS_BASE" \
+    --simulations "$simulation_range"
+
+exit_status=$?
+
+echo "============================================"
+echo "Computation completed with exit status: $exit_status"
+echo "End Time: $(date)"
+echo "============================================"
+
+exit $exit_status

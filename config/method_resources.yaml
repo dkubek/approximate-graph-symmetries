@@ -5,35 +5,36 @@
 method_resources:
   QSA:
     ncpus: 1
-    mem: "2gb"
-    scratch_local: "2gb"
+    mem: "4gb"
+    scratch_local: "4gb"
     walltime: "00:30:00"
-    description: "Quick Simplex Algorithm - Fast single-threaded"
+    description: "QSA"
     
   InteriorPoint:
-    ncpus: 8
-    mem: "16gb"
-    scratch_local: "8gb"
-    walltime: "04:00:00"
+    ncpus: 16
+    mem: "4gb"
+    scratch_local: "4gb"
+    walltime: "06:00:00"
     description: "Interior Point with IPOPT - CPU intensive"
     
   Manifold:
-    ncpus: 8
-    mem: "16gb"
-    scratch_local: "8gb"
-    walltime: "04:00:00"
+    ncpus: 16
+    mem: "4gb"
+    scratch_local: "4gb"
+    walltime: "02:00:00"
     description: "Manifold optimization - Memory intensive"
     
   OT4P4AS:
     ncpus: 4
-    mem: "8gb"
+    mem: "4gb"
     scratch_local: "4gb"
-    walltime: "02:00:00"
-    description: "Optimal Transport - Moderate resources"
+    walltime: "05:00:00"
+    description: "Orthogonal Relaxation"
+    split_simulations: 5
     
   SoftSort:
     ncpus: 4
-    mem: "8gb"
+    mem: "4gb"
     scratch_local: "4gb"
-    walltime: "02:00:00"
-    description: "Soft Sorting - Moderate resources"
+    walltime: "03:00:00"
+    description: "Soft Sorting"
