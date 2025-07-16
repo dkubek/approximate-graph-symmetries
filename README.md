@@ -82,7 +82,8 @@ You can run a specific optimization method on a subset of the data. For example,
 first 3 simulations of all available instances:
 
 ```bash
-python run.py \
+mkdir results
+uv run run.py \
     --methods QSA \
     --simulations 0-2 \
     --config config/config.yaml \
@@ -116,6 +117,7 @@ To run an experiment, you need to mount the local `data` and `results` directori
 This command runs the same experiment as the local example above, but inside the Docker container:
 
 ```bash
+mkdir results
 docker run --rm \
     -v "$PWD/data:/app/data" \
     -v "$PWD/results:/app/results" \
