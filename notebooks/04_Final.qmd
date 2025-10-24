@@ -1,0 +1,1964 @@
+---
+title: "Experimental Results"
+author: "David Kubek"
+format:
+  html:
+    toc: true
+    toc-depth: 3
+    code-fold: true
+    code-summary: "Show code"
+    self-contained: true
+  pdf:
+    toc: true
+    number-sections: true
+    colorlinks: true
+jupyter: python3
+execute:
+  warning: false
+  message: false
+---
+
+# Introduction {#sec-intro}
+
+This chapter presents a comprehensive experimental evaluation of five
+optimization methods for solving the approximate symmetry problem in networks.
+We compare three iterative methods operating on the Birkhoff polytope---the
+Quadratic Symmetry Approximator (QSA), Manifold Optimization (MF), and Interior
+Point Method (IP)---against two temperature-based approaches---Dimensionality
+Reduction (DR) and Orthogonal Relaxation (OR). Through systematic evaluation on
+synthetic network models, we will be interested (among others) in evaluating
+mainly the following questions:
+
+- Second-order optimization methods and menifold optimization will outperform
+first-order methods by exploiting curvature information in the non-convex
+landscape.
+
+- For temperature-based methods, indefinite relaxation will yield superior
+solutions compared to convex relaxation as per prevailing assumption suggested
+by Lyzinski~\cite{lyzinski2015graph}.
+
+- Dimensionality reduction from $O(n^2)$ to $O(n)$ parameters will not result in
+degraded solution quality.
+
+- Method performance rankings will remain consistent across different network
+topologies and sizes.
+
+Our experimental design employs three synthetic network models with controlled
+structural properties: 
+- Erdős-Rényi (ER) random graphs,
+- Barabási-Albert (BA) scale-free networks representing real-world structures
+- Lateral Random Model (LRM) networks providing controlled approximate symmetries.
+
+This systematic evaluation enables us to assess both the absolute performance of
+each method and their relative strengths across varying problem instances.
+
+
+## Experimental Setup
+
+```{python}
+#| label: setup
+#| code-summary: "Import libraries and set up visualization defaults"
+
+import numpy as np
+import pandas as pd
+import seaborn as sns
+from pathlib import Path
+import matplotlib.pyplot as plt
+from matplotlib.gridspec import GridSpec
+import matplotlib.colors as mcolors
+import warnings
+import scienceplots
+
+# Suppress warnings for cleaner output
+warnings.filterwarnings('ignore', category=FutureWarning)
+
+# Set visualization style for publication-ready figures
+plt.style.use(['science'])
+plt.rcParams.update({
+    'font.size': 13,
+    'axes.labelsize': 20,  # Increase axis description font size
+    'axes.titlesize': 22,  # Increase plot title font size
+    'xtick.labelsize': 12,
+    'ytick.labelsize': 12,
+    'legend.fontsize': 18,  # Increase legend font size
+    'figure.titlesize': 24, # Increase suptitle font size
+    #'font.family': 'serif',
+    #'font.serif': ['Times'],
+    'text.usetex': True,
+    'text.latex.preamble': '\\usepackage{libertinus}',
+    'pgf.rcfonts': False,
+    'pdf.fonttype': 42,  # Ensures font embedding
+    'pgf.texsystem': 'pdflatex',
+    'pgf.preamble': '\n'.join([
+        '\\usepackage[a-1b]{pdfx}',
+        '\\usepackage[utf8]{inputenc}',
+        '\\usepackage[T1]{fontenc}',
+        '\\usepackage{libertine}',  # This is Linux Libertine, very similar
+        '\\usepackage{amsmath,amssymb}',
+    ]),
+    'figure.dpi': 300,
+    'savefig.dpi': 300,
+    'savefig.bbox': 'tight',
+    #'savefig.bbox': 'standard',
+    'savefig.pad_inches': 0.1,
+    'image.interpolation': 'none' 
+})
+
+# Define consistent color palette for methods
+#METHOD_COLORS = {
+#    'QSA': '#2E86AB',      # Blue
+#    'Manifold': '#A23B72',  # Purple
+#    'InteriorPoint': '#F18F01',  # Orange
+#    'SoftSort': '#C73E1D',  # Red
+#    'OT4P4AS': '#4A7C59'    # Green
+#}
+METHOD_COLORS = dict(zip([
+    'QSA',
+    'Manifold',
+    'InteriorPoint',
+    'SoftSort',
+    'OT4P4AS',
+], sns.color_palette("deep")))
+
+
+# Method name mapping
+METHOD_NAMES = {
+    'QSA': 'QSA',
+    'Manifold': 'MF',
+    'InteriorPoint': 'IP',
+    'SoftSort': 'DR',
+    'OT4P4AS': 'OR'
+}
+
+# Set the color palette
+sns.set_palette(list(METHOD_COLORS.values()))
+
+# Create output directory for figures
+figure_dir = Path("figures")
+table_dir = Path("tables")
+figure_dir.mkdir(exist_ok=True)
+table_dir.mkdir(exist_ok=True)
+
+# Helper function to save figures
+def save_figure(fig, name):
+    """Save figure in PDF format with consistent settings"""
+
+    fig.savefig(figure_dir / f"{name}.pdf", format='pdf', backend='pgf')
+
+
+def save_table(df, name, caption="", show_index=None, **kwargs):
+    """Export table to publication-ready LaTeX with full MultiIndex support"""
+    
+    # Auto-detect if we should show index
+    if show_index is None:
+        show_index = isinstance(df.index, pd.MultiIndex) or not df.index.equals(pd.RangeIndex(len(df)))
+    
+    has_multiindex_rows = isinstance(df.index, pd.MultiIndex) and show_index
+    has_multiindex_cols = isinstance(df.columns, pd.MultiIndex)
+    
+    # Dynamic column formatting
+    col_formats = []
+    if show_index:
+        if has_multiindex_rows:
+            col_formats.extend(['l'] * df.index.nlevels)
+        else:
+            col_formats.append('l')  # Single index column
+    
+    # Format data columns
+    for col in df.columns:
+        if pd.api.types.is_numeric_dtype(df[col]):
+            col_formats.append('r')
+        else:
+            col_formats.append('l')
+    
+    column_format = ''.join(col_formats)
+    
+    def safe_float_format(x):
+        try:
+            if pd.isna(x):
+                return ''
+            if isinstance(x, (int, float)):
+                return f"{x:.3f}" if abs(x) < 100 else f"{x:.1f}"
+            return str(x)
+        except:
+            return str(x)
+    
+    print(has_multiindex_rows)
+    latex_str = df.to_latex(
+        index=show_index,  # Now controlled by parameter
+        escape=False,
+        column_format=column_format,
+        multirow=has_multiindex_rows,
+        multicolumn=has_multiindex_cols,
+        longtable=True,
+        float_format=safe_float_format,
+        na_rep='',
+        caption=caption if caption else None,
+        position='htbp',
+        **kwargs
+    )
+    
+    with open(table_dir / f"{name}.tex", 'w', encoding='utf-8') as f:
+        f.write(latex_str)
+```
+
+```{python}
+#| label: load-data
+#| code-summary: "Load experimental results data"
+
+# Load the experimental results
+output_dir = Path("processed_data")
+df = pd.read_csv(output_dir / "graph_symmetry_results_all.csv")
+
+# Apply method name mapping
+df['method_display'] = df['method'].map(METHOD_NAMES)
+
+# Display basic information about the dataset
+print(f"Total number of experimental runs: {len(df):,}")
+print(f"Methods evaluated: {', '.join(df['method'].unique())}")
+print(f"Graph types: {', '.join(df['graph_type'].unique())}")
+print(f"\nData shape: {df.shape}")
+print(f"\nColumns: {', '.join(df.columns)}")
+```
+
+```{python}
+# Filter dirty data
+df = df[~((df["method"] == "SoftSort") & (df["method_max_iter"] == 3000))]
+```
+
+```{python}
+# Decode rewiring values (0 -> 0, 1 -> 13, 2 -> 50, 3 -> 130)
+df['rew'] = df['rew'].replace({0.0: 0, 1.0: 13, 2.0: 50, 3.0: 130}).astype('Int64')
+```
+
+```{python}
+df['graph_type'] = df['graph_type'].replace({"LRM_ER": "LRM"})
+```
+
+```{python}
+df['density'] = (df['density'] / 100).apply(lambda x: f"{x:.2f}")
+```
+
+```{python}
+hlp = df.filter(regex='^method').drop_duplicates()
+df_iter_params = hlp[hlp["method"].isin(["QSA", "Manifold", "InteriorPoint"])]
+df_temp_params = hlp[hlp["method"].isin(["SoftSort", "OT4P4AS"])]
+df_iter_params.set_index(list(df_iter_params.columns))
+df_temp_params.set_index(list(df_iter_params.columns))
+```
+
+### Computational Environment
+
+All experiments were conducted on the CESNET MetaCentrum computational cluster.
+While we utilized the cluster's resources for parallel execution of experiments,
+we did not enforce uniform hardware specifications across all runs.
+Consequently, individual simulations may have executed on machines with varying
+CPU specifications and system loads. However, given that our primary metrictemps
+focus on solution quality rather than runtime, these hardware variations should
+not materially affect our conclusions.
+
+
+### Network Models and Experimental Design {#sec-network-models}
+
+Our experiments employ three synthetic network models, each serving a specific
+purpose in evaluating method performance:
+
+1. **Erdős-Rényi (ER)**: Random graphs with no inherent structure, providing a
+baseline for symmetry detection in unstructured networks.
+
+2. **Barabási-Albert (BA)**: Scale-free networks generated through preferential
+attachment, representing the heterogeneous degree distributions common in
+real-world networks.
+
+3. **Lateral Random Model (LRM)**: Networks with controlled bilateral symmetry,
+subsequently perturbed through edge rewiring to create known approximate
+symmetries.
+
+The experimental design systematically varies network size (nodes: 20, 50, 100),
+edge density (sparse: 15, dense: 40), and for LRM networks, the degree of
+asymmetry through rewiring (0, 13, 50, 130 edge modifications). This yields 28
+distinct graph configurations spanning three topological families.
+
+
+### Performance Metrics {#sec-metrics}
+
+We evaluate methods using three primary metrics:
+
+1. **Success Rate**: Proportion of runs finding non-identity solutions,
+indicating the method's ability to avoid trivial optima.
+
+2. **Convergence Behavior**: Number of iterations until method convergence or
+local optimum is found, revealing computational efficiency and optimization
+landscape navigation.
+
+3. **Symmetry Coefficient**: The normalized asymmetry measure $S(A) \in [0,1]$
+where lower values indicate better approximate symmetries, as defined
+in~\cref{eq:symmetry-coefficient}.
+
+
+# Analysis of Iterative Methods {#sec-iterative}
+
+We first examine the three iterative optimization methods that operate directly
+on the Birkhoff polytope: QSA (the current state-of-the-art), Manifold
+Optimization (MF), and the Interior Point method (IP). These methods represent
+different algorithmic philosophies: first-order gradient methods (QSA), manifold
+optimization (MF), and second-order methods (IP).
+
+```{python}
+#| label: filter-iterative
+#| code-summary: "Filter data for iterative methods"
+
+# Filter for iterative methods
+iterative_methods = ["QSA", "Manifold", "InteriorPoint"]
+df_iterative = df[df["method"].isin(iterative_methods)].copy()
+
+# Ensure consistent ordering
+graph_types = ["ER", "BA", "LRM"]
+method_order = ['QSA', 'MF', 'IP']
+```
+
+## Identity Avoidance and Parameter Selection {#sec-identity}
+
+A fundamental challenge in approximate symmetry detection is avoiding the
+trivial identity permutation, which yields zero asymmetry but provides no
+insight. We analyze the effect of the penalty parameter $c$ which controls this
+trade-off, penalizing fixed points to encourage non-trivial solutions.
+
+```{python}
+#| label: fig-identity-success
+#| fig-cap: "Success rate (proportion of non-identity solutions) as a function of penalty parameter $c$ for iterative methods across different graph types, network sizes, and edge densities. Higher values indicate better performance in avoiding trivial solutions. Note that some elements might overlap."
+#| fig-width: 12
+#| fig-height: 10
+
+# Calculate success rates for non-identity solutions
+identity_data = df_iterative.copy()
+identity_data['is_non_identity'] = identity_data["n_nodes"] != identity_data["fixed_points"]
+
+# Aggregate by simulation to check if ANY run was non-identity
+success_by_sim = (
+    identity_data
+    .groupby(["density", "method_display", "graph_type", "n_nodes", "rew", "c", "sim_id"], 
+             dropna=False)["is_non_identity"]
+    .any()
+    .reset_index()
+    .rename(columns={'is_non_identity': 'success'})
+)
+
+# Calculate proportion of successful simulations
+success_rates = (
+    success_by_sim
+    .groupby(["density", "method_display", "graph_type", "n_nodes", "rew", "c"], 
+             dropna=False)["success"]
+    .mean()
+    .reset_index()
+    .rename(columns={'success': 'success_rate'})
+)
+
+# Create separate plots for each graph type
+for graph_type in ["ER", "BA"]:
+    data_subset = success_rates[success_rates["graph_type"] == graph_type]
+    
+    g = sns.relplot(
+        data=data_subset,
+        x='c', 
+        y='success_rate', 
+        hue='method_display',
+        palette={METHOD_NAMES[m]: METHOD_COLORS[m] for m in ["QSA", "Manifold", "InteriorPoint"]},
+        style="density",
+        col="n_nodes", 
+        row="graph_type",
+        kind="line",
+        markers=True,
+        height=3,
+        facet_kws={'sharex': True, 'sharey': True}
+    )
+
+    for text in g._legend.get_texts():
+        if text.get_text() == 'method_display':
+            text.set_text('Method')
+        elif text.get_text() == 'density':
+            text.set_text('Density')
+    
+    g.set_axis_labels("Penalty parameter $c$", "Success rate")
+    g.set_titles("{row_name} ($n={col_name}$)")
+    g.fig.suptitle(f"Identity Avoidance: {graph_type} Network", y=1.04, weight='bold')
+    
+    save_figure(g.fig, f"identity-success-{graph_type.lower()}")
+    plt.show()
+
+# Handle LRM separately due to different structure
+lrm_data = success_rates[success_rates["graph_type"] == "LRM"]
+if not lrm_data.empty:
+    g = sns.relplot(
+        data=lrm_data,
+        x='c', 
+        y='success_rate', 
+        hue='method_display',
+        palette={METHOD_NAMES[m]: METHOD_COLORS[m] for m in ["QSA", "Manifold", "InteriorPoint"]},
+        style="density",
+        col="rew",
+        row="n_nodes",
+        kind="line",
+        markers=True,
+        height=3,
+        facet_kws={'sharex': True, 'sharey': True}
+    )
+
+    for text in g._legend.get_texts():
+        if text.get_text() == 'method_display':
+            text.set_text('Method')
+        elif text.get_text() == 'density':
+            text.set_text('Density')
+    
+    g.set_axis_labels("Penalty parameter $c$", "Success rate")
+    g.set_titles("LRM ($n={row_name}$, $k={col_name}$)")
+    g.fig.suptitle("Identity Avoidance: LRM Network", y=1.04, weight='bold')
+    
+    save_figure(g.fig, "identity-success-lrm")
+    plt.show()
+```
+
+The analysis reveals distinct patterns across methods:
+
+- **QSA and MF** demonstrate robust performance with high success rates even at
+low penalty values (high density Barabasi Albert poses some problems for MF at
+lower penalty values does exhibit lower success rates).
+
+- **IP** requires substantially higher penalty values to consistently avoid
+identity solutions, particularly on BA networks.
+
+- Edge density emerges as a critical factor: denser networks generally increase
+the difficulty of finding non-trivial symmetries across all methods for lower
+penalty values.
+
+## Convergence Analysis {#sec-convergence}
+
+Understanding the convergence behavior provides insights into the practical
+applicability of each method. We analyze the distribution of iterations required
+for convergence and identify instances that challenge each method.
+
+```{python}
+#| label: fig-iteration-distribution
+#| code-summary: "Analyze convergence behavior across methods and graph types"
+#| fig-cap: "Distribution of iterations until convergence for iterative methods across different graph types. The spike at 500 iterations indicates instances that reached the maximum iteration limit without converging."
+#| fig-width: 10
+#| fig-height: 8
+
+# Create iteration distribution plot
+g = sns.displot(
+    data=df_iterative,
+    x="metric_iterations",
+    hue="method_display",
+    palette={METHOD_NAMES[m]: METHOD_COLORS[m] for m in ["QSA", "Manifold", "InteriorPoint"]},
+    col="method_display",
+    row="graph_type",
+    kind="hist",
+    stat="proportion",
+    bins=30,
+    height=3,
+    facet_kws={'sharex': True, 'sharey': True}
+)
+
+g._legend.set_title("Method")
+
+
+g.set_axis_labels("Number of iterations", "Proportion of runs")
+g.set_titles("{row_name} - {col_name}")
+g.fig.suptitle("Iteration Distribution by Method and Graph Type", y=1.02, weight='bold')
+
+save_figure(g.fig, "iteration-distribution")
+plt.show()
+```
+
+
+```{python}
+#| label: fig-convergence-heatmap
+#| fig-cap: "Non-convergence rates across methods and problem configurations. Values indicate the proportion of runs reaching the maximum iteration limit (500 iterations) without satisfying convergence criteria. Lower values indicate more reliable convergence."
+#| fig-width: 11
+#| fig-height: 10
+#| code-summary: "Create heatmap of non-convergence rates"
+
+# Calculate convergence rates
+convergence_data = df_iterative.copy()
+convergence_data['hit_max_iter'] = (
+    convergence_data["method_max_iter"] == convergence_data["metric_iterations"]
+).astype(int)
+
+# Aggregate convergence rates
+conv_rates = (
+    convergence_data
+    .groupby(['method_display', 'graph_type', 'n_nodes', 'density'])['hit_max_iter']
+    .agg(['mean', 'count'])
+    .reset_index()
+    .rename(columns={'mean': 'non_convergence_rate', 'count': 'total_runs'})
+)
+
+
+# --- Create the Discrete Colormap ---
+# 1. Choose a base continuous colormap
+base_cmap = 'rocket' 
+
+# 2. Define the number of discrete levels you want
+n_colors = 20
+
+# 3. Create a new discrete colormap from the base map
+discrete_cmap = mcolors.ListedColormap(
+    sns.color_palette(base_cmap, n_colors).as_hex()
+)
+
+# Create heatmap grid
+fig, axes = plt.subplots(3, 3, figsize=(11, 10))
+
+# Generate heatmaps
+for i, method in enumerate(method_order):
+    for j, graph_type in enumerate(graph_types):
+        subset = conv_rates[
+            (conv_rates['method_display'] == method) & 
+            (conv_rates['graph_type'] == graph_type)
+        ]
+        
+        if not subset.empty:
+            heatmap_data = subset.pivot(
+                index='density', 
+                columns='n_nodes', 
+                values='non_convergence_rate'
+            )
+            
+            sns.heatmap(
+                heatmap_data, 
+                ax=axes[i, j], 
+                annot=True,
+                fmt='.3f',
+                vmin=0, 
+                vmax=1.0,
+                cbar=(j == len(graph_types) - 1),
+                cmap=discrete_cmap,
+            )
+            
+            axes[i, j].set_title(f'{method} - {graph_type}')
+            axes[i, j].set_xlabel('Number of nodes' if i == 2 else '')
+            axes[i, j].set_ylabel('Edge density' if j == 0 else '')
+
+plt.suptitle('Non-Convergence Rates: Proportion of Runs Reaching Iteration Limit', y=1.00, weight='bold')
+plt.tight_layout()
+save_figure(fig, "convergence-heatmap")
+plt.show()
+```
+
+
+The convergence analysis reveals method-specific characteristics:
+
+- **MF** exhibits the most reliable convergence, rarely reaching the iteration
+limit even on more challenging instances, suggesting effective navigation of the
+manifold structure.
+
+- **QSA** shows predictable scaling with problem size, with non-convergence
+rates increasing monotonically with network size.
+
+- **IP** displays irregular convergence patterns, particularly on BA networks
+where non-convergence rates do not follow expected scaling, suggesting
+sensitivity to the specific problem structure rather than size alone. This can
+be caused by the fact that for more complex and dense networks the method is
+able to determine and find a local optimum much sooner.
+
+## Symmetry Performance {#sec-symmetry-iterative}
+
+We now examine the quality of solutions found by each method, measured by the
+symmetry coefficient.
+
+
+```{python}
+#| label: fig-symmetry-vs-c
+#| fig-cap: "Symmetry coefficient as a function of penalty parameter $c$ for non-identity solutions. Lower values indicate better approximate symmetries. Error bars show 95% confidence intervals."
+#| fig-width: 12
+#| fig-height: 10
+
+# Filter for non-identity solutions only
+symmetry_data = df_iterative[
+    df_iterative["n_nodes"] != df_iterative["fixed_points"]
+].copy()
+
+# Get best symmetry per simulation
+best_symmetry = (
+    symmetry_data
+    .groupby(["density", "method_display", "graph_type", "n_nodes", "rew", "c", "sim_id"], 
+             dropna=False)["symmetry"]
+    .min()
+    .reset_index()
+)
+
+# Plot for ER and BA
+for graph_type in ["ER", "BA"]:
+    data_subset = best_symmetry[best_symmetry["graph_type"] == graph_type]
+    
+    g = sns.relplot(
+        data=data_subset,
+        x="c",
+        y="symmetry",
+        hue="method_display",
+        palette={METHOD_NAMES[m]: METHOD_COLORS[m] for m in ["QSA", "Manifold", "InteriorPoint"]},
+        style="density",
+        col="n_nodes",
+        row="graph_type",
+        kind="line",
+        markers=True,
+        errorbar='ci',
+        height=3,
+    )
+    for text in g._legend.get_texts():
+        if text.get_text() == 'method_display':
+            text.set_text('Method')
+        elif text.get_text() == 'density':
+            text.set_text('Density')
+    
+    g.set_axis_labels("Penalty parameter $c$", "Symmetry coefficient")
+    g.set_titles("{row_name} ($n={col_name}$)")
+    g.fig.suptitle(f"Symmetry Quality vs Penalty: {graph_type} Networks", y=1.04, weight='bold')
+    
+    save_figure(g.fig, f"symmetry-vs-c-{graph_type.lower()}")
+    plt.show()
+
+# Plot for LRM networks with rewiring faceting
+lrm_data = best_symmetry[best_symmetry["graph_type"] == "LRM"]
+if not lrm_data.empty:
+    # LRM networks have different parameter structure - facet by rewiring
+    g = sns.relplot(
+        data=lrm_data,
+        x="c",
+        y="symmetry",
+        hue="method_display",
+        palette={METHOD_NAMES[m]: METHOD_COLORS[m] for m in ["QSA", "Manifold", "InteriorPoint"]},
+        style="density",
+        row="n_nodes",
+        col="rew",
+        kind="line",
+        markers=True,
+        errorbar='ci',
+        height=3,
+        facet_kws={'sharex': True, 'sharey': True}
+    )
+    for text in g._legend.get_texts():
+        if text.get_text() == 'method_display':
+            text.set_text('Method')
+        elif text.get_text() == 'density':
+            text.set_text('Density')
+    
+    g.set_axis_labels("Penalty parameter $c$", "Symmetry coefficient")
+    g.set_titles("LRM ($n={row_name}$, $k={col_name}$)")
+    g.fig.suptitle("Symmetry Quality vs Penalty: LRM Networks", y=1.04, weight='bold')
+    
+    # Adjust spacing for the larger grid
+    #g.fig.subplots_adjust(hspace=0.15, wspace=0.15)
+    
+    save_figure(g.fig, "symmetry-vs-c-lrm")
+    plt.show()
+```
+
+The symmetry quality analysis provides evidence for the hypothesis that second
+order information helps find higher quality symmetries, but the parameter
+sensitivity analysis reveal nuances that demand more careful interpretation:
+
+### Primary Performance Validation
+
+1. **IP consistently outperforms both QSA and MF** across majority of graph
+types and configurations, achieving lower symmetry coefficients with smaller
+variance.
+
+2. **Perfect symmetry recovery**: On LRM networks with zero rewirings, IP
+successfully identifies the exact bilateral symmetry in all instances, while QSA
+and MF fail to achieve perfect recovery.
+
+3. **Robust performance under perturbation**: As rewiring increases in LRM
+networks, IP maintains its performance advantage, demonstrating superior ability
+to find approximate symmetries even in perturbed structures.
+
+
+### Parameter Sensitivity and the Identity Solution Trade-off
+
+The penalty parameter analysis exposes a fundamental tension in optimization
+strategy. Lower penalty values \(c\) consistently produce lower symmetry
+coefficients across all methods, but this apparent improvement masks a critical
+algorithmic failure: **higher rates of convergence to uninformative identity solutions**.
+
+For Barabási-Albert and Erdős-Rényi models, this trade-off becomes particularly
+pronounced. While lower \(c\) values yield better symmetry coefficients, they
+simultaneously decrease the success rate of finding non-trivial symmetries. This
+creates a tradeof: the parameter settings that produce more accurate symmetries
+are those that fail more frequently to provide any meaningful structural
+insight.
+
+### Methodological Implications
+
+This trade-off fundamentally challenges how we evaluate algorithm performance.  **Optimizing solely for low symmetry coefficients incentivizes parameter choices that maximize algorithmic failure rates**. The analysis suggests we must also prioritize algorithmic reliability over raw performance metrics.
+
+The optimal parameter selection strategy therefore becomes: identify the
+parameter configuration with highest non-identity solution rates, then select
+the minimum \(c\) value within that configuration. This approach ensures
+methodological soundness while preserving the best achievable symmetry quality.
+
+### Network-Specific Behavioral Patterns
+
+The LRM model exhibits theoretically expected convergence behavior: as rewiring
+increases, the structural properties approach those of random graphs, and
+symmetry detection performance mirrors that observed in Erdős-Rényi networks.
+However, there is a slight counter-intuitive correlation between higher \(c\)
+and lower symmetry coefficient in LRM models for the IP methed most notably seen
+for rewirings k=13. This warrants deeper investigation, as it contradicts the
+general trend observed across other network types.
+
+
+```{python}
+#| label: tbl-optimal-c
+#| tbl-cap: "Optimal penalty parameter values for each method, selected to maximize success rate while minimizing the parameter value"
+
+# Find optimal c values for each method
+optimal_c = []
+for method in ["QSA", "Manifold", "InteriorPoint"]:
+    method_data = success_by_sim[success_by_sim["method_display"] == METHOD_NAMES[method]]
+    
+    # Count successful simulations for each c value
+    success_counts = (
+        method_data
+        .groupby("c")
+        .agg(
+            successful_sims=('success', 'sum'),
+            total_sims=('success', 'count'),
+            success_rate=('success', 'mean')
+        )
+        .reset_index()
+    )
+    
+    # Find c values with maximum success
+    max_success = success_counts['successful_sims'].max()
+    best_c_values = success_counts[success_counts['successful_sims'] == max_success]['c']
+    optimal_c_value = best_c_values.min()  # Choose minimum among best
+    
+    optimal_c.append({
+        'Method': METHOD_NAMES[method],
+        'Optimal c': optimal_c_value,
+        'Success Rate': success_counts[success_counts['c'] == optimal_c_value]['success_rate'].iloc[0],
+        #'Successful Simulations': int(max_success)
+    })
+
+optimal_c_df = pd.DataFrame(optimal_c)
+print(optimal_c_df.to_markdown(index=False, floatfmt=".3f"))
+save_table(optimal_c_df, "optimal_parameters_iterative", 
+           "Optimal penalty parameters for iterative methods based on identity avoidance analysis",
+           label="tab:optimal-parameters-iterative"
+           )
+```
+
+Based on this analysis, we select optimal penalty parameters that maximize
+success while minimizing the penalty strength: $c = 0.2$ for QSA, $c = 0.5$ for
+MF, and $c = 1.0$ for IP. These values achieve near-maximal success rates while
+avoiding excessive penalization that might compromise solution quality.
+
+
+```{python}
+#| label: fig-symmetry-comparison
+#| fig-cap: "Comparison of symmetry coefficients achieved by each method using optimal penalty parameters. Box plots show the distribution across all simulations, with lower values indicating better performance."
+#| fig-width: 12
+#| fig-height: 8
+
+# Use optimal c values from earlier analysis
+optimal_c_dict = {
+    d["Method"]: d["Optimal c"] for d in optimal_c
+}
+
+# Filter data for optimal c values
+optimal_data = symmetry_data[
+    symmetry_data.apply(
+        lambda x: x['c'] == optimal_c_dict.get(x['method_display']), 
+        axis=1
+    )
+]
+
+# Get best result per simulation
+optimal_best = (
+    optimal_data
+    .groupby(["density", "method_display", "graph_type", "n_nodes", "rew", "sim_id"], 
+             dropna=False)["symmetry"]
+    .min()
+    .reset_index()
+)
+
+# Create comparison plots
+for graph_type in ["ER", "BA"]:
+    data_subset = optimal_best[optimal_best["graph_type"] == graph_type]
+    
+    g = sns.catplot(
+        data=data_subset,
+        x="n_nodes",
+        y="symmetry", 
+        hue="method_display",
+        palette={METHOD_NAMES[m]: METHOD_COLORS[m] for m in ["QSA", "Manifold", "InteriorPoint"]},
+        row="graph_type",
+        col="density",
+        kind="box",
+        showfliers=False,
+        height=3,
+        aspect=1.5,
+        dodge=True
+    )
+
+    g._legend.set_title("Method")
+    g.set_axis_labels("Number of nodes", "Symmetry coefficient")
+    g.set_titles("{row_name} ($\\rho={col_name}$)")
+    g.fig.suptitle(f"Method Comparison: {graph_type} Networks", y=1.04, weight='bold')
+    
+    save_figure(g.fig, f"symmetry-comparison-{graph_type.lower()}")
+    plt.show()
+
+# LRM comparison
+lrm_best = optimal_best[optimal_best["graph_type"] == "LRM"]
+if not lrm_best.empty:
+    g = sns.catplot(
+        data=lrm_best,
+        x="rew",
+        y="symmetry",
+        hue="method_display",
+        palette={METHOD_NAMES[m]: METHOD_COLORS[m] for m in ["QSA", "Manifold", "InteriorPoint"]},
+        col="n_nodes",
+        row="density",
+        kind="box",
+        showfliers=False,
+        height=3,
+        aspect=1.5,
+        dodge=True
+    )
+    
+    g._legend.set_title("Method")
+    g.set_axis_labels("Number of rewirings", "Symmetry coefficient")
+    g.set_titles("LRM ($n={col_name}$, $\\rho={row_name}$)")
+    g.fig.suptitle("Method Comparison: LRM Networks", y=1.04, weight='bold')
+    
+    save_figure(g.fig, "symmetry-comparison-lrm")
+    plt.show()
+```
+
+
+### Scalability Analysis and Method Comparison
+
+In the above figure, the performance comparison under optimal parameter
+configurations reveals distinct scalability profiles that present new
+algorithmic hierarchies in approximate symmetry detection.
+
+#### Scale-Dependent Performance Dynamics
+
+**Erdős-Rényi Networks**: The analysis exposes a
+performance crossover phenomenon. While QSA demonstrates marginal superiority
+at smaller network sizes (lower node counts), **IP method exhibits superior
+scaling characteristics**, systematically outperforming QSA as network size
+increases. The MF consistently slightly underperforms across all scales.
+
+**Barabási-Albert Networks**: The scale-free topology exhibits analogous
+performance patterns, reinforcing the generalizability of IP's scaling
+advantages across diverse network architectures. The consistency of this trend
+across both random and preferential attachment models suggests that 
+**the superiority of IP is not topology-dependent**
+
+#### Perfect Symmetry Detection: A Critical Discriminator
+
+The LRM analysis with zero rewiring provides the most compelling evidence for
+IP's algorithmic superiority. **IP achieves perfect symmetry recovery
+(coefficient = 0) in all successful of cases**, while both QSA and MF fail
+systematically to identify exact left-right symmetries. 
+
+#### Computational Hierarchy Implications
+
+The empirical evidence establishes a hierarchy:
+
+1. **Interior Point (IP)**: Superior performance across scales, perfect symmetry
+recovery for LRM (rew = 0)
+
+2. **Quadratic Symmetry Approximator (QSA)**: Competitive at small scales, good
+performance with increasing network size
+
+3. **Manifold-based Frank-Wolfe (MF)**: slightly inferior performance across all conditions
+
+
+```{python}
+#| label: tbl-symmetry-summary
+#| tbl-cap: "Summary statistics for symmetry coefficients achieved by each method across different graph types using optimal parameters"
+
+# Calculate summary statistics
+summary_stats = []
+for method in ["QSA", "Manifold", "InteriorPoint"]:
+    optimal_best_method = optimal_best[optimal_best["method_display"] == METHOD_NAMES[method]]
+    
+    groups = (
+        optimal_best_method
+        .groupby(["graph_type", "n_nodes", "density", "rew"], dropna=False)
+    )
+    for group_id, group_data in groups:
+        graph_type, n_nodes, density, rew = group_id
+
+        method_graph_data = group_data['symmetry']
+        if not method_graph_data.empty:
+            summary_stats.append({
+                'Method': METHOD_NAMES[method],
+                'Network': graph_type,
+                'Nodes': n_nodes,
+                'Density': density,
+                'Rewirings': '' if pd.isna(rew) else str(rew),
+                'Median': method_graph_data.median(),
+                'Mean': method_graph_data.mean(),
+                'Std Dev': method_graph_data.std(), 
+            })
+
+summary_df = pd.DataFrame(summary_stats)
+print(summary_df.to_markdown(index=False, floatfmt=".4f"))
+save_table(
+    summary_df.set_index(["Method", "Network", "Nodes", "Density", "Rewirings"]),
+    "symmetry_summary_iterative",
+    "Summary statistics for symmetry coefficients achieved by iterative methods",
+    label="tab:symmetry-summary-iterative",
+    #header=["Method", "Network", "$n$", r"\rho", "$k$", "Median", "Mean", "SD", "Min", "Max"]
+)
+```
+
+```{python}
+# # Create composite grouping that preserves rewiring information
+# def create_graph_rewiring_key(row):
+#     if pd.isna(row['rew']):
+#         return (row['graph_type'], '')
+#     else:
+#         return (row['graph_type'], row['rew'])
+# 
+# # Calculate summary statistics with proper multi-index grouping
+# summary_stats = []
+# for method in ["QSA", "Manifold", "InteriorPoint"]:
+#     method_data = optimal_best[optimal_best["method_display"] == METHOD_NAMES[method]]
+#     
+#     for (graph_type, rew_label), group_data in method_data.groupby(['graph_type', 'rew'], dropna=False):
+#         symmetry_data = group_data["symmetry"]
+#         
+#         summary_stats.append({
+#             'Method': METHOD_NAMES[method],
+#             'Graph Type': graph_type,
+#             'Rewiring': rew_label,
+#             'Mean': symmetry_data.mean(),
+#             'Median': symmetry_data.median(),
+#             'Std Dev': symmetry_data.std(), 
+#             'Min': symmetry_data.min(),
+#             'Max': symmetry_data.max(),
+#         })
+# 
+# # Create DataFrame with multi-index
+# summary_df = pd.DataFrame(summary_stats)
+# 
+# print(summary_df.to_markdown(floatfmt=".4f", index=False))
+# save_table(
+#     summary_df.set_index(["Method", "Graph Type",]),
+#     "symmetry_summary_with_rewiring",
+#     "Summary statistics for symmetry coefficients with rewiring parameters",
+#     label="tab:symmetry-summary-iterative",
+# )
+```
+
+The symmetry quality analysis provides evidence for:
+
+1. **IP consistently outperforms both QSA and MF** across all graph types and configurations, achieving lower symmetry coefficients.
+
+2. **Perfect symmetry recovery**: On LRM networks with zero rewirings, IP successfully identifies the exact bilateral symmetry in all instances, while QSA and MF fail to achieve perfect recovery.
+
+# Analysis of Temperature-Based Methods {#sec-temperature}
+
+We now examine the two temperature-based optimization methods: Dimensionality
+Reduction (DR) and Orthogonal Relaxation (OR). These methods employ temperature
+parameters to control the transition from continuous relaxations to discrete
+permutations. While also not working on the Birkhoff polytope they are offering
+a fundamentally different approach from the iterative methods.
+
+```{python}
+#| label: filter-temperature
+#| code-summary: "Filter data for temperature-based methods"
+
+# Select temperature-based methods
+df_temp = df[df["method"].isin(["SoftSort", "OT4P4AS"])].copy()
+
+# Remove specific (leftover) configuration
+df_temp = df_temp[~((df_temp["method"] == "SoftSort") & (df_temp["method_max_iter"] == 3000))]
+
+# Add annealing indicator and combined method/loss column
+df_temp['is_anneal'] = ~df_temp['method_final_tau'].isna()
+df_temp['method_loss_combined'] = df_temp['method'].apply(lambda x: METHOD_NAMES[x]) + '/' + df_temp['method_loss']
+df_temp['method_display'] = df_temp['method'].map(METHOD_NAMES)
+
+print(f"Temperature-based methods data shape: {df_temp.shape}")
+print(f"Loss functions: {df_temp['method_loss'].unique()}")
+print(f"Temperature ranges examined:")
+print(df_temp.groupby('method_display')['method_initial_tau'].unique())
+```
+
+
+## Loss Function Comparison {#sec-loss-functions}
+
+A critical design choice for temperature-based methods is the selection of loss
+function. Following Lyzinski et al.~\cite{lyzinski2015graph} suggests that
+indefinite relaxations yield superior results for matching problems. We test
+this assumption by comparing convex and indefinite formulations.
+
+```{python}
+#| label: fig-iteration-distribution-temp
+#| fig-cap: "Distribution of iterations until best solution found for temperature-based methods, separated by loss function type and temperature parameter. The concentration of iterations near the maximum limit (3000 for DR, 2000 for OR) indicates premature termination."
+#| fig-width: 12
+#| fig-height: 10
+
+# Filter for non-annealing runs
+non_anneal_data = df_temp[~df_temp['is_anneal']].copy()
+
+# Create iteration distribution plots for each method
+for method in ["SoftSort", "OT4P4AS"]:
+    method_data = non_anneal_data[non_anneal_data['method'] == method]
+    
+    if not method_data.empty:
+        g = sns.displot(
+            data=method_data,
+            x='metric_best_iteration',
+            col="method_initial_tau",
+            row="method_loss",
+            hue="graph_type",
+            kind="hist",
+            palette=sns.color_palette("deep")[7:],
+            multiple="stack",
+            height=3,
+            #aspect=1.2,
+            bins=30
+        )
+        g._legend.set_title("Graph Type")
+        
+        g.set_axis_labels("Iteration number", "Count")
+        g.set_titles("Loss: {row_name}, $\\tau={col_name}$")
+        g.fig.suptitle(
+            f"Iteration when best solution was found: {METHOD_NAMES[method]} Method", y=1.04, weight='bold'
+            )
+        
+        save_figure(g.fig, f"iteration-dist-temp-{METHOD_NAMES[method].lower()}")
+        plt.show()
+```
+
+The iteration analysis reveals contrasting behaviors:
+
+- **Convex loss** enables both methods to find good solutions early in the optimization process (there does not seem to be a lot of cases where the method hit a ceiling of the maximal allocated number of iterations and it seems like the methods using convex relaxation are able to find the best solution relatively sooner)
+- **Indefinite loss** shows method-specific patterns with regard to temperature parameter (tau):
+  - DR struggles with slow convergence, particularly at lower temperatures
+  - OR exhibits opposite behavior, with better early convergence at lower temperatures
+
+## Temperature Parameter Analysis {#sec-temperature-params}
+
+Temperature parameters control the degree of continuous relaxation, with lower
+values enforcing stricter adherence to permutation constraints. We examine how
+this critical parameter affects solution quality.
+
+```{python}
+#| label: fig-symmetry-vs-temperature
+#| fig-cap: "Effect of temperature parameter on symmetry quality for different loss functions. Lower symmetry coefficients indicate better solutions. Box plots show distributions across all non-identity solutions."
+#| fig-width: 14
+#| fig-height: 12
+
+# Filter non-identity solutions
+temp_symmetry = non_anneal_data[
+    non_anneal_data["n_nodes"] != non_anneal_data["fixed_points"]
+].copy()
+
+# Get best symmetry per simulation
+temp_best = (
+    temp_symmetry
+    .groupby(["method_display", "graph_type", "n_nodes", "density", 
+              "method_loss", "method_initial_tau", "rew", "sim_id"], dropna=False)['symmetry']
+    .min()
+    .reset_index()
+)
+
+# Filter non-identity solutions
+temp_symmetry = non_anneal_data[
+    non_anneal_data["n_nodes"] != non_anneal_data["fixed_points"]
+].copy()
+
+# Get best symmetry per simulation
+temp_best = (
+    temp_symmetry
+    .groupby(["method_display", "graph_type", "n_nodes", "density", 
+              "method_loss", "c", "rew", "method_initial_tau", "sim_id"], dropna=False)['symmetry']
+    .min()
+    .reset_index()
+)
+
+# Create composite variable combining method_loss and rew
+def create_method_rew_key(row):
+    if row['graph_type'] == 'LRM' and not pd.isna(row['rew']):
+        return f"{row['method_loss']}, $k={int(row['rew'])}$"
+    else:
+        return row['method_loss']
+
+temp_best['method_rew_display'] = temp_best.apply(create_method_rew_key, axis=1)
+
+# Custom palette function
+def create_loss_rew_palette(data, base_colors=None):
+    """Create palette with 2 base colors and shading by rew values"""
+    
+    if base_colors is None:
+        base_colors = sns.color_palette("deep")[5:7]
+    
+    # Get unique method_loss values and rew values
+    method_losses = data['method_loss'].unique()
+    
+    # Get rew values for LRM graphs
+    lrm_data = data[data['graph_type'] == 'LRM']
+    rew_values = sorted(lrm_data['rew'].dropna().unique()) if not lrm_data.empty else []
+    
+    palette = {}
+    
+    # Handle cases without rew (non-LRM graphs)
+    for i, method_loss in enumerate(method_losses):
+        palette[method_loss] = base_colors[i % len(base_colors)]
+    
+    # Handle cases with rew (LRM graphs)
+    if rew_values:
+        for i, method_loss in enumerate(method_losses):
+            base_color = base_colors[i % len(base_colors)]
+            
+            # Create gradient from light to dark
+            n_shades = len(rew_values)
+            if n_shades > 1:
+                # Create shades from lighter to darker
+                color_shades = sns.light_palette(base_color, n_colors=n_shades + 2)[1:-1]
+                #color_shades = color_shades[::-1]  # Reverse to go light to dark
+            else:
+                color_shades = [base_color]
+            
+            for j, rew in enumerate(rew_values):
+                palette[f"{method_loss}, $k={int(rew)}$"] = color_shades[j]
+    
+    return palette
+
+# Apply in your plotting loop
+for method in ["SoftSort", "OT4P4AS"]:
+    method_data = temp_best[temp_best["method_display"] == METHOD_NAMES[method]]
+    
+    for graph_type in graph_types:
+        graph_data = method_data[method_data["graph_type"] == graph_type]
+        
+        if not graph_data.empty:
+            # Create custom palette for this specific dataset
+            custom_palette = create_loss_rew_palette(
+                graph_data, 
+            )
+            
+            g = sns.catplot(
+                data=graph_data,
+                y="symmetry",
+                x="method_initial_tau",
+                hue="method_rew_display",  # Composite variable
+                palette=custom_palette,     # Custom palette
+                row="density",
+                col="n_nodes",
+                kind="box",
+                showfliers=False,
+                height=3,
+                aspect=1.0,
+                dodge=True
+            )
+            g._legend.set_title("Loss" + (", Rewirings" if graph_type == "LRM" else ""))
+
+            g.set_axis_labels("Temperature $\\tau$", "Symmetry coefficient")
+            g.set_titles("$n={col_name}$, $\\rho={row_name}$")
+            g.fig.suptitle(f"Symmetry Quality vs. Temperature for {METHOD_NAMES[method]} Method on {graph_type} Networks", y=1.04, weight='bold')
+            
+            save_figure(g.fig, f"symmetry-vs-temp-{METHOD_NAMES[method].lower()}-{graph_type.lower()}")
+            plt.show()
+```
+
+
+### Dimensionality Reduction: Classical Temperature Behavior
+
+**DR exhibits expected temperature-dependent performance**: lower temperatures systematically improve symmetry detection quality across all network architectures. The temperature parameter \(\tau\) directly controls the discretization strength in the SoftSort operator, and **reducing temperature from higher values consistently decreases symmetry coefficients** (indicating better performance).
+
+This behavior aligns with established understanding of temperature annealing in optimization. As \(\tau\) approaches zero, the SoftSort operation increasingly approximates hard permutation assignments. The consistency of this trend across Erdős-Rényi, Barabási-Albert, and LRM networks confirms that **DR benefits universally from stronger discretization pressure**.
+
+Regarding loss function selection, **convex relaxation demonstrates systematic better performance over indefinite formulations** across network types, with the performance gap becoming more pronounced at larger graph sizes. This finding directly contradicts our initial hypothesis and suggests that the optimization landscape benefits from convex formulations.
+
+### Orthogonal Relaxation: Anomalous Temperature Dynamics
+
+**OR exhibits fundamentally different temperature sensitivity**, with higher temperatures (\(\tau = 0.7\)) producing superior symmetry detection performance. This counterintuitive behavior suggests that **excessive discretization actively harms optimization effectiveness** in the orthogonal manifold setting.
+
+We hypothesize, the mechanism behind this phenomenon likely involves the fact
+that higher temperatures maintain greater flexibility in the orthogonal space,
+allowing the optimization to explore a richer geometric landscape before
+committing to discrete solutions. Premature discretization may trap the
+algorithm in suboptimal regions of the manifold where the nearest permutation
+matrix provides poor symmetry detection.
+
+**LRM networks exhibit the most dramatic temperature sensitivity for OR**,
+*achieving remarkably low symmetry coefficients at optimal temperature settings.
+
+### Loss Function Performance: Systematic Convex Advantage
+
+The systematic superiority of convex over indefinite formulations across both DR and OR methods represents a **challenge to established graph matching theory**. Lyzinski et al.'s work suggested that indefinite relaxations should outperform convex alternatives.
+
+**Our empirical evidence systematically this is the case for the DR and OR methods**. The convex formulations consistently achieve slightly better symmetry detection across methods, network types, and scales. This discrepancy suggests:
+
+2. **Method-specific interactions**: The particular optimization frameworks (DR and OR) may interact differently with loss function geometry than classical graph matching approaches
+3. **Problem structure differences**: Approximate symmetry detection may possess different optimization characteristics than general graph matching problems
+
+## Penalty parameter analysis
+
+
+```{python}
+#| label: fig-symmetry-vs-penalty
+#| fig-cap: "Effect of penalty parameter on symmetry quality for different loss functions. Lower symmetry coefficients indicate better solutions. Box plots show distributions across all non-identity solutions."
+#| fig-width: 14
+#| fig-height: 12
+
+# Filter non-identity solutions
+temp_symmetry = non_anneal_data[
+    non_anneal_data["n_nodes"] != non_anneal_data["fixed_points"]
+].copy()
+
+# Get best symmetry per simulation
+temp_best = (
+    temp_symmetry
+    .groupby(["method_display", "graph_type", "n_nodes", "density", 
+              "method_loss", "method_initial_tau", "rew", "sim_id"], dropna=False)['symmetry']
+    .min()
+    .reset_index()
+)
+
+# Filter non-identity solutions
+temp_symmetry = non_anneal_data[
+    non_anneal_data["n_nodes"] != non_anneal_data["fixed_points"]
+].copy()
+
+# Get best symmetry per simulation
+temp_best = (
+    temp_symmetry
+    .groupby(["method_display", "graph_type", "n_nodes", "density", 
+              "method_loss", "c", "rew", "method_initial_tau", "sim_id"], dropna=False)['symmetry']
+    .min()
+    .reset_index()
+)
+
+# Create composite variable combining method_loss and rew
+def create_method_rew_key(row):
+    if row['graph_type'] == 'LRM' and not pd.isna(row['rew']):
+        return f"{row['method_loss']}, $k={int(row['rew'])}$"
+    else:
+        return row['method_loss']
+
+temp_best['method_rew_display'] = temp_best.apply(create_method_rew_key, axis=1)
+
+# Custom palette function
+def create_loss_rew_palette(data, base_colors=None):
+    """Create palette with 2 base colors and shading by rew values"""
+    
+    if base_colors is None:
+        base_colors = sns.color_palette("deep")[5:7]
+    
+    # Get unique method_loss values and rew values
+    method_losses = data['method_loss'].unique()
+    
+    # Get rew values for LRM graphs
+    lrm_data = data[data['graph_type'] == 'LRM']
+    rew_values = sorted(lrm_data['rew'].dropna().unique()) if not lrm_data.empty else []
+    
+    palette = {}
+    
+    # Handle cases without rew (non-LRM graphs)
+    for i, method_loss in enumerate(method_losses):
+        palette[method_loss] = base_colors[i % len(base_colors)]
+    
+    # Handle cases with rew (LRM graphs)
+    if rew_values:
+        for i, method_loss in enumerate(method_losses):
+            base_color = base_colors[i % len(base_colors)]
+            
+            # Create gradient from light to dark
+            n_shades = len(rew_values)
+            if n_shades > 1:
+                # Create shades from lighter to darker
+                color_shades = sns.light_palette(base_color, n_colors=n_shades + 2)[1:-1]
+                #color_shades = color_shades[::-1]  # Reverse to go light to dark
+            else:
+                color_shades = [base_color]
+            
+            for j, rew in enumerate(rew_values):
+                palette[f"{method_loss}, $k={int(rew)}$"] = color_shades[j]
+    
+    return palette
+
+# Apply in your plotting loop
+for method in ["SoftSort", "OT4P4AS"]:
+    method_data = temp_best[temp_best["method_display"] == METHOD_NAMES[method]]
+    
+    for graph_type in graph_types:
+        graph_data = method_data[method_data["graph_type"] == graph_type]
+        
+        if not graph_data.empty:
+            # Create custom palette for this specific dataset
+            custom_palette = create_loss_rew_palette(
+                graph_data, 
+            )
+
+            g = sns.catplot(
+                data=graph_data,
+                y="symmetry",
+                x="c",
+                hue="method_rew_display",  # Composite variable
+                palette=custom_palette,     # Custom palette
+                row="density",
+                col="n_nodes",
+                kind="box",
+                showfliers=False,
+                height=3,
+                aspect=1.0,
+                dodge=True
+            )
+            g._legend.set_title("Loss" + (", Rewirings" if graph_type == "LRM" else ""))
+            
+            g.set_axis_labels("Penalty $c$", "Symmetry coefficient")
+            g.set_titles("$n={col_name}$, $\\rho={row_name}$")
+            g.fig.suptitle(f"Symmetry Quality vs. Penalty for {METHOD_NAMES[method]} Method on {graph_type} Networks", y=1.04, weight='bold')
+            
+            save_figure(g.fig, f"symmetry-vs-c-{METHOD_NAMES[method].lower()}-{graph_type.lower()}")
+            plt.show()
+```
+
+### Penalty Parameter Analysis: The Identity Solution Trade-off
+
+The penalty parameter analysis exposes a tension between optimization quality
+and algorithmic reliability that concerns both temperature-based methods:
+
+#### Universal Penalty Sensitivity
+
+**Both DR and OR exhibit consistent penalty-dependent behavior**: lower penalty values \(c\) systematically produce lower symmetry coefficients across all network architectures. 
+
+#### Optimal Parameter Selection Strategy
+
+The penalty analysis reinforces the methodological principle established
+earlier: **prioritize algorithmic reliability over raw performance metrics**.
+The optimal penalty selection strategy becomes:
+
+1. **Identify the minimum penalty value that maintains acceptable non-identity solution rates** 
+2. **Within the reliable parameter regime, select the lowest viable penalty** to maximize symmetry detection quality
+3. **Consider network-specific adjustments** for highly structured graphs where penalty sensitivity may be enhanced
+
+#### Methodological Configuration Selection
+
+Based on this analysis, **optimal configurations diverge significantly between methods**:
+
+- **DR optimal configuration**: \(\tau = 0.1\) (strong discretization) with convex loss
+- **OR optimal configuration**: \(\tau = 0.7\) (weak discretization) with convex loss  
+- **Universal penalty setting**: \(c = 0.1\) (minimal penalty) for both methods
+
+These configurations reflect the fundamental geometric differences between the
+optimization approaches: DR benefits from more aggressive discretization to
+approximate hard assignments, while OR benefits from geometric flexibility to
+navigate the orthogonal manifold effectively. The universal preference for
+convex loss functions demands reconsideration of theoretical foundations in
+approximate symmetry detection.
+
+
+## Annealing Effects {#sec-annealing}
+
+Temperature annealing gradually decreases the temperature parameter during
+optimization, potentially balancing exploration and exploitation. We compare
+fixed temperature strategies against cosine annealing schedules.
+
+```{python}
+#| label: fig-annealing-comparison
+#| fig-cap: "Comparison of fixed temperature versus annealing strategies for temperature-based methods. Annealing uses cosine schedule: DR (10.0→0.1), OR (0.7→0.3)."
+#| fig-width: 12
+#| fig-height: 10
+
+# Select best fixed temperature configurations
+# Note: Correcting tau value for SoftSort based on earlier optimal configuration analysis
+best_fixed = df_temp[
+    (~df_temp['is_anneal']) & 
+    (((df_temp['method'] == 'SoftSort') & (df_temp['method_initial_tau'] == 0.1) & (df_temp['c'] == 0.1)) |
+     ((df_temp['method'] == 'OT4P4AS') & (df_temp['method_initial_tau'] == 0.7) & (df_temp['c'] == 0.1)))
+].copy()
+
+# Combine with annealing data
+annealing_comparison = pd.concat([best_fixed, df_temp[df_temp['is_anneal']]])
+
+# Filter non-identity solutions
+annealing_comparison = annealing_comparison[
+    annealing_comparison["n_nodes"] != annealing_comparison["fixed_points"]
+]
+
+# Get best per simulation
+annealing_best = (
+    annealing_comparison
+    .groupby(["method_display", "method_loss", "is_anneal", 
+              "graph_type", "density", "n_nodes", "rew", "sim_id"], dropna=False)["symmetry"]
+    .min()
+    .reset_index()
+)
+
+# Create combined identifier
+annealing_best['strategy'] = annealing_best.apply(
+    lambda x: f"{x['method_display']}, {x['method_loss']}, {'Anneal' if x['is_anneal'] else 'Fixed'}", 
+    axis=1
+)
+
+# Plot comparison for each method
+for method in ["SoftSort", "OT4P4AS"]:
+    method_data = annealing_best[
+        annealing_best["method_display"] == METHOD_NAMES[method]
+    ]
+    
+    if not method_data.empty:
+        # Separate ER/BA from LRM networks
+        er_ba_data = method_data[method_data["graph_type"].isin(["ER", "BA"])]
+        lrm_data = method_data[method_data["graph_type"] == "LRM"]
+        
+        # Plot ER and BA networks
+        if not er_ba_data.empty:
+            g = sns.catplot(
+                data=er_ba_data,
+                y="symmetry",
+                x="n_nodes",
+                hue="strategy",
+                row="graph_type",
+                col="density",
+                kind="box",
+                showfliers=False,
+                height=3,
+                aspect=1.5,
+                dodge=True,
+                sharex=True,
+                sharey=True,
+                palette=sns.color_palette("deep")[::-1],
+            )
+            g._legend.set_title("Method, Loss, $\\tau$ Strategy")
+            
+            g.set_axis_labels("Number of nodes", "Symmetry coefficient")
+            g.set_titles("{row_name}, $\\rho = {col_name}$")
+            g.fig.suptitle(f"Annealing Effect vs. Fixed $\\tau$ for {METHOD_NAMES[method]} on ER/BA Networks", y=1.04, weight='bold')
+            
+            save_figure(g.fig, f"annealing-comparison-{METHOD_NAMES[method].lower()}-er-ba")
+            plt.show()
+        
+        # Plot LRM networks separately with rewiring faceting
+        if not lrm_data.empty:
+            g = sns.catplot(
+                data=lrm_data,
+                y="symmetry",
+                x="rew",
+                hue="strategy",
+                row="n_nodes",
+                col="density",
+                kind="box",
+                showfliers=False,
+                height=3,
+                aspect=1.5,
+                dodge=True,
+                sharex=True,
+                sharey=True,
+                palette=sns.color_palette("deep")[::-1],
+            )
+            g._legend.set_title("Method, Loss, $\\tau$ Strategy")
+            
+            g.set_axis_labels("Number of rewirings ($k$)", "Symmetry coefficient")
+            g.set_titles("$n={row_name}$, $\\rho={col_name}$")
+            g.fig.suptitle(f"Annealing Effect vs. Fixed $\\tau$ for {METHOD_NAMES[method]} on LRM Networks", y=1.04, weight='bold')
+            
+            save_figure(g.fig, f"annealing-comparison-{METHOD_NAMES[method].lower()}-lrm-alt")
+            plt.show()
+```
+
+### Annealing Schedule Analysis: Complexity vs. Performance Trade-offs
+
+The annealing analysis demonstrates that carefully chosen fixed temperatures
+generally match or exceed the performance of annealing schedules, suggesting
+that the additional complexity of temperature scheduling may not be justified
+for these methods. However, the empirical evidence reveals method-specific and
+scale-dependent nuances.
+
+### Dimensionality Reduction: Marginal Annealing Benefits
+
+**DR method exhibits modest performance improvements under annealing schemes** across all network architectures, with the quality benefits being most pronounced in smaller, sparser networks. The annealing process provides a systematic exploration strategy that begins with high temperature exploration and gradually increases discretization pressure, theoretically enabling better global optimization.
+However, **the annealing advantage diminishes systematically as network size and density increase**. 
+
+### Orthogonal Relaxation: Annealing as Performance Impediment
+
+**OR method demonstrates fundamentally different annealing sensitivity**, with temperature scheduling generally degrading performance relative to optimal fixed temperature configurations. Except for small graph instances where annealing provides marginal benefits, **the systematic annealing process consistently underperforms carefully selected static temperatures**.
+
+This result suggests that the orthogonal manifold optimization benefits from consistent geometric flexibility rather than progressive discretization. The annealing process may force premature commitment to discrete solutions, preventing the algorithm from effectively exploring the rich geometric structure of the orthogonal group. The geodesic interpolation mechanism appears to function more effectively under stable temperature conditions.
+
+### Computational Efficiency Implications
+
+The annealing analysis reveals a **clear computational efficiency advantage for fixed temperature approaches**. Annealing schedules introduce additional hyperparameter complexity (schedule type, rate parameters, duration) while providing minimal or negative performance benefits. 
+
+**Fixed temperature configurations eliminate the need for schedule tuning** while achieving superior or equivalent performance. This simplification reduces the algorithmic parameter space and removes a potential source of method instability across different network types and scales.
+
+### Methodological Recommendations
+
+The empirical evidence supports **abandoning annealing schedules in favor of carefully optimized fixed temperatures** for both DR and OR methods. The marginal benefits observed in DR at small scales are insufficient to justify the increased parametric complexity, particularly given the performance degradation at larger scales where practical applications typically operate.
+
+
+```{python}
+#| label: tbl-annealing-summary
+#| tbl-cap: "Statistical comparison of fixed temperature versus annealing strategies"
+
+# Calculate summary statistics for annealing comparison
+annealing_stats = []
+for method in ["SoftSort", "OT4P4AS"]:
+    method_data = annealing_best[annealing_best["method_display"] == METHOD_NAMES[method]]
+
+    groups = method_data.groupby(
+        ['method_loss', 'is_anneal', 'graph_type', 'n_nodes', 'density', 'rew'], dropna=False
+    )
+    for group_id, group_data in groups:
+        (method_loss, is_anneal, graph_type, n_nodes, density, rew_label) = group_id
+        symmetry_data = group_data["symmetry"]
+
+        if not subset.empty:
+            annealing_stats.append({
+                'Method': METHOD_NAMES[method],
+                'Loss': method_loss,
+                'Strategy': 'Annealing' if is_anneal else 'Fixed',
+                'Graph Type': graph_type,
+                'Nodes': n_nodes,
+                'Density': density,
+                'Rewirings': '' if pd.isna(rew) else str(rew),
+                'Median': symmetry_data.median(),
+                'Mean': symmetry_data.mean(),
+                'SD': symmetry_data.std(),
+            })
+
+annealing_df = pd.DataFrame(annealing_stats)
+print(annealing_df.to_markdown(index=False, floatfmt=".4f"))
+save_table(
+    annealing_df.set_index(["Method", "Loss", "Strategy", "Graph Type", "Nodes", "Density", "Rewirings"]),
+    "annealing_summary",
+    "Performance comparison of fixed versus annealing temperature strategies",
+    label="tab:annealing-summary"
+)
+```
+
+Key findings from temperature-based methods:
+
+1. **Convex relaxation consistently outperforms** indefinite relaxation for both methods
+3. **Annealing provides no consistent benefit** and often degrades performance, particularly for DR
+4. **Optimal fixed temperatures**: τ = 0.1 for DR, τ = 0.7 for OR with convex loss
+
+# Comparative Analysis {#sec-comparison}
+
+Having analyzed iterative and temperature-based methods separately, we now
+present a unified comparison across all five methods.
+
+## Method Comparison Across Graph Types {#sec-unified-comparison}
+
+```{python}
+#| label: prepare-unified-data
+#| code-summary: "Prepare data for unified comparison using optimal configurations"
+
+# Define optimal configurations for each method
+optimal_configs = {
+    'QSA': {'c': 0.2},
+    'Manifold': {'c': 0.5},
+    'InteriorPoint': {'c': 1.0},
+    'SoftSort': {'method_initial_tau': 1.0, 'c': 0.1, 'method_loss': 'convex'},
+    'OT4P4AS': {'method_initial_tau': 0.7, 'c': 0.1, 'method_loss': 'convex'}
+}
+
+# Filter data for optimal configurations
+unified_data = []
+
+# Process iterative methods
+for method in ['QSA', 'Manifold', 'InteriorPoint']:
+    method_df = df[
+        (df['method'] == method) & 
+        (df['c'] == optimal_configs[method]['c'])
+    ].copy()
+    method_df['config'] = f"c={optimal_configs[method]['c']}"
+    unified_data.append(method_df)
+
+# Process temperature methods
+for method in ['SoftSort', 'OT4P4AS']:
+    method_df = df[
+        (df['method'] == method) & 
+        (df['method_initial_tau'] == optimal_configs[method]['method_initial_tau']) &
+        (df['method_loss'] == optimal_configs[method]['method_loss']) &
+        (df['c'] == optimal_configs[method]['c']) &
+        (df['method_final_tau'].isna())
+    ].copy()
+    method_df['config'] = f"τ={optimal_configs[method]['method_initial_tau']}, {optimal_configs[method]['method_loss']}"
+    unified_data.append(method_df)
+
+# Combine all data
+unified_df = pd.concat(unified_data, ignore_index=True)
+unified_df['method_display'] = unified_df['method'].map(METHOD_NAMES)
+
+# Filter non-identity solutions
+unified_df = unified_df[unified_df["n_nodes"] != unified_df["fixed_points"]]
+
+# Get best result per simulation
+unified_best = (
+    unified_df
+    .groupby(["method_display", "graph_type", "n_nodes", "density", "rew", "sim_id"], dropna=False)["symmetry"]
+    .min()
+    .reset_index()
+)
+```
+
+The unified comparison reveals a clear performance hierarchy with
+network-specific behavioral patterns that illuminate the fundamental differences
+between optimization paradigms:
+
+1. **IP dominates across all configurations**, consistently achieving the lowest symmetry coefficients on ER and BA networks while matching OR's perfect symmetry recovery on unperturbed LRM networks.
+
+2. **QSA maintains competitive performance** as the current state-of-the-art, generally ranking second among all methods.
+
+3. **MF slightly underperforms QSA**, suggesting that the manifold structure alone does not provide sufficient advantage without second-order information.
+
+4. **Temperature-based methods lag significantly**, with DR outperforming OR but both falling well short of the iterative methods' performance.
+
+## Network-Specific Performance Analysis
+
+### Random and Scale-Free Networks
+
+**Erdős-Rényi and Barabási-Albert networks exhibit consistent algorithmic hierarchies**. The three iterative methods (IP, QSA, MF) form a closely competitive cluster with comparable performance ranges, while temperature-based approaches (DR, OR) demonstrate substantially elevated symmetry coefficients indicating inferior performance. Within the competitive cluster, **IP achieves systematic superiority over the established QSA benchmark**, confirming the advantages of second-order optimization methods.
+
+The performance gap between iterative and temperature-based methods on random topologies suggests that **continuous relaxation approaches outperform these different parameterization methods** when underlying network structure lacks clear symmetrical patterns. 
+
+### Structured Networks: The LRM Phenomenon
+
+**Lateral Random Model networks reveal the most dramatic method-specific behaviors**. On unperturbed instances (zero rewiring), both IP and OR achieve perfect symmetry recovery, demonstrating exact solution capability when bilateral symmetry exists. This perfect recovery represents a qualitative performance advantage, as other methods consistently fail to identify exact structural correspondences.
+
+However, **OR exhibits severe instability under structural perturbation**. As rewiring increases, OR performance deteriorates rapidly, suggesting that the orthogonal relaxation approach becomes increasingly unreliable as network structure deviates from perfect symmetry. This instability pattern indicates fundamental limitations in the method's robustness to structural noise.
+
+**IP maintains performance superiority across the entire perturbation spectrum**, demonstrating exceptional robustness to structural variations. As LRM networks approach random topology through increasing rewiring, the performance hierarchy converges to the pattern observed in purely random networks, with IP outperforming QSA and QSA outperforming MF.
+
+## Methodological Implications
+
+The unified analysis establishes **Interior Point methods as the preferred algorithmic choice when the highest symmetry rates are desired** for approximate symmetry detection, surpassing the current state-of-the-art QSA across virtually all tested configurations. This performance advantage appears robust across network types, scales, and structural perturbation levels.
+
+**Temperature-based methods, despite theoretical appeal, demonstrate systematic practical limitations**. The dramatic performance gap suggests that low-dimensional parameterization approaches sacrifice too much optimization flexibility to achieve computational efficiency. The theoretical elegance of SoftSort-based dimensionality reduction and orthogonal manifold relaxation fails to translate into competitive empirical performance.
+
+The consistent underperformance of temperature-based approaches relative to iterative methods suggests that **high-dimensional optimization landscapes in approximate symmetry detection require sophisticated search strategies** that cannot be effectively replaced by clever parameterization schemes. The complexity of the symmetry detection problem appears to demand the full representational power of doubly stochastic matrices rather than compressed representations.
+
+
+```{python}
+#| label: fig-unified-comparison
+#| fig-cap: "Unified comparison of all five methods using their optimal configurations across different graph types and parameters. Methods are compared on symmetry coefficient (lower is better)."
+#| fig-width: 14
+#| fig-height: 10
+
+# Create unified comparison plots
+for graph_type in graph_types:
+    data_subset = unified_best[unified_best["graph_type"] == graph_type]
+    
+    if not data_subset.empty:
+        if graph_type != "LRM":
+            g = sns.catplot(
+                data=data_subset,
+                x="n_nodes",
+                y="symmetry",
+                hue="method_display",
+                hue_order=['QSA', 'MF', 'IP', 'DR', 'OR'],
+                palette={m: METHOD_COLORS[k] for k, m in METHOD_NAMES.items()},
+                col="density" if graph_type != "LRM" else "rew",
+                kind="box",
+                height=4,
+                aspect=1.5,
+                dodge=True,
+                showfliers=False
+            )
+            g._legend.set_title("Method")
+            
+            g.set_axis_labels("Number of nodes", "Symmetry coefficient")
+            g.set_titles("$\\rho={col_name}$")
+            g.fig.suptitle(f"Symmetry Comparison - All Methods: {graph_type} Networks", y=1.04, weight='bold')
+            
+            save_figure(g.fig, f"unified-comparison-{graph_type.lower()}")
+            plt.show()
+        else:
+            g = sns.catplot(
+                data=data_subset,
+                x="rew",
+                y="symmetry",
+                hue="method_display",
+                hue_order=['QSA', 'MF', 'IP', 'DR', 'OR'],
+                palette={m: METHOD_COLORS[k] for k, m in METHOD_NAMES.items()},
+                col="n_nodes",
+                row="density",
+                kind="box",
+                height=4,
+                aspect=1.5,
+                dodge=True,
+                showfliers=False
+            )
+            g._legend.set_title("Method")
+            
+            g.set_titles("$k={col_name}$")
+            g._legend.set_title("Method")
+            g.set_axis_labels("Number of rewirings", "Symmetry coefficient")
+            g.set_titles("$n={col_name}$, $\\rho={row_name}$")
+            g.fig.suptitle(f"Symmetry Comparison - All Methods: {graph_type} Networks", y=1.04, weight='bold')
+            
+            save_figure(g.fig, f"unified-comparison-{graph_type.lower()}")
+            plt.show()
+```
+
+Below are the same stastistics written form table as a table
+
+```{python}
+#| label: tbl-unified-summary
+#| tbl-cap: "Summary statistics for all methods across graph types using optimal configurations"
+
+# Calculate comprehensive summary statistics
+comprehensive_stats = []
+for method in METHOD_NAMES.values():
+    method_data = unified_best[unified_best["method_display"] == method]
+
+    groups = method_data.groupby(
+        ['graph_type', 'n_nodes', 'density', 'rew'], dropna=False
+    )
+    for group_id, group_data in groups:
+        (graph_type, n_nodes, density, rew) = group_id
+        symmetry_data = group_data["symmetry"]
+
+        if not subset.empty:
+            comprehensive_stats.append({
+                'Method': method,
+                'Graph Type': graph_type,
+                'Nodes': n_nodes,
+                'Density': density,
+                'Rewirings': '' if pd.isna(rew) else str(rew),
+                'Median': symmetry_data.median(),
+                'Mean': symmetry_data.mean(),
+                'SD': symmetry_data.std(),
+            })
+
+comprehensive_df = pd.DataFrame(comprehensive_stats)
+print(comprehensive_df.to_markdown(index=False, floatfmt=".4f"))
+save_table(
+    comprehensive_df.set_index(["Method", "Graph Type", "Nodes", "Density", "Rewirings"]),
+    "final_performance_summary",
+    "Comprehensive performance metrics for all optimization methods"
+)
+```
+
+
+```{python}
+#| label: fig-computational-time
+#| fig-cap: "Computational time required by each method across different network configurations. Time is shown on a logarithmic scale to accommodate the wide range of values. Box plots show the distribution across all runs, with outliers removed for clarity."
+#| fig-width: 14
+#| fig-height: 10
+#| code-summary: "Compare computational time across methods and graph types"
+
+# Filter for optimal configurations as used in unified comparison
+time_data = unified_df.copy()
+
+# Separate ER/BA from LRM due to different parameter structure
+er_ba_time = time_data[time_data['graph_type'].isin(['ER', 'BA'])]
+lrm_time = time_data[time_data['graph_type'] == 'LRM']
+
+# Plot ER and BA networks
+if not er_ba_time.empty:
+    g = sns.catplot(
+        data=er_ba_time,
+        x="n_nodes",
+        y="metric_time",
+        hue="method_display",
+        hue_order=['QSA', 'MF', 'IP', 'DR', 'OR'],
+        palette={m: METHOD_COLORS[k] for k, m in METHOD_NAMES.items()},
+        row="graph_type",
+        col="density",
+        kind="point",
+        #showfliers=False,
+        height=3,
+        legend_out=True
+    )
+    g._legend.set_title("Method")
+    
+    # Set log scale and labels
+    g.set(yscale="log")
+    g.set_axis_labels("Number of nodes", "Time (seconds)")
+    g.set_titles("{row_name} ($\\rho={col_name}$)")
+    
+    # Adjust y-axis format for better readability
+    for ax in g.axes.flat:
+        ax.yaxis.set_major_formatter(plt.FuncFormatter(lambda y, _: f'{y:.1f}' if y >= 1 else f'{y:.2f}'))
+    
+    g.fig.suptitle("Computational Time: ER and BA Networks", y=1.04, weight='bold')
+    
+    save_figure(g.fig, "computational-time-er-ba")
+    plt.show()
+
+# Plot LRM networks separately
+if not lrm_time.empty:
+    # For LRM, use rewiring as columns
+    g = sns.catplot(
+        data=lrm_time,
+        x="rew",
+        y="metric_time",
+        hue="method_display",
+        hue_order=['QSA', 'MF', 'IP', 'DR', 'OR'],
+        palette={m: METHOD_COLORS[k] for k, m in METHOD_NAMES.items()},
+        row="density",
+        col="n_nodes",
+        kind="point",
+        #showfliers=False,
+        height=3,
+        legend_out=True,
+        sharex=True,
+        sharey=True
+    )
+    g._legend.set_title("Method")
+    
+    # Set log scale and labels
+    g.set(yscale="log")
+    g.set_axis_labels("Number of rewirings ($k$)", "Time (seconds)")
+    g.set_titles("$n={col_name}$, $\\rho={row_name}$")
+    
+    # Adjust y-axis format
+    for ax in g.axes.flat:
+        ax.yaxis.set_major_formatter(plt.FuncFormatter(lambda y, _: f'{y:.1f}' if y >= 1 else f'{y:.2f}'))
+    
+    g.fig.suptitle("Computational Time: LRM Networks", y=1.04, weight='bold')
+    
+    save_figure(g.fig, "computational-time-lrm")
+    plt.show()
+```
+
+```{python}
+#| label: tbl-computational-time
+#| tbl-cap: "Summary of computational time requirements for all optimization methods. Times are reported in seconds across all experimental runs using optimal parameter configurations. The 'Time Ratio vs QSA' column shows the relative computational cost of each method compared to the baseline QSA method (ratio > 1 indicates slower than QSA). Statistics are computed across all graph types, network sizes, and parameter combinations."
+
+# Create summary statistics table
+time_summary = []
+for method in METHOD_NAMES.values():
+    method_times = time_data[time_data["method_display"] == method]["metric_time"]
+
+    if not method_times.empty:
+        time_summary.append(
+            {
+                "Method": method,
+                "Median Time (s)": method_times.median(),
+                "Mean Time (s)": method_times.mean(),
+                "Time Ratio vs QSA": method_times.median()
+                / time_data[time_data["method_display"] == "QSA"][
+                    "metric_time"
+                ].median(),
+            }
+        )
+
+time_summary_df = pd.DataFrame(time_summary)
+print(time_summary_df.to_markdown(index=False, floatfmt=".2f"))
+save_table(
+    time_summary_df,
+    "computational_time",
+    "Summary of computational time requirements for all optimization methods. Times are reported in seconds across all experimental runs using optimal parameter configurations. The 'Time Ratio vs QSA' column shows the relative computational cost of each method compared to the baseline QSA method (ratio > 1 indicates slower than QSA). Statistics are computed across all graph types, network sizes, and parameter combinations.",
+    label="tab:computational-time",
+)
+```
+
+
+## Computational Efficiency Analysis
+
+The practical deployment of approximate symmetry detection methods requires
+careful consideration of computational requirements alongside solution quality
+metrics. This section provides a comprehensive analysis of the computational
+time characteristics across all evaluated methods, examining both absolute
+performance and scalability properties that influence method selection in
+resource-constrained environments.
+
+### Computational Time Requirements
+
+The computational time analysis reveals substantial variation in efficiency
+across the five optimization methods, as summarized in Table XX. The results
+demonstrate that performance improvements often come at significant
+computational cost, creating fundamental trade-offs between solution quality and
+computational efficiency that must be carefully evaluated in practice.
+
+**Interior Point methods exhibit the high computational requirements**, with median execution times approximately X times longer than the baseline QSA method. This substantial computational overhead reflects the inherent complexity of second-order optimization approaches, which must solve large linear systems at each iteration to incorporate curvature information. The matrix factorizations and linear algebra operations required by IPOPT's primal-dual interior point algorithm contribute to both the method's superior convergence properties and its elevated computational demands.
+
+**QSA provides the computational baseline** for comparison, representing the current state-of-the-art balance between solution quality and efficiency. The method's first-order Frank-Wolfe approach achieves fast computational performance while maintaining competitive solution quality across network types and sizes.
+
+**Manifold optimization demonstrates intermediate computational requirements**, with timing characteristics that fall between the lightweight temperature-based methods and the computationally intensive Interior Point approach. The geometric operations required for tangent space projections and retraction operations contribute to moderate computational overhead while providing the convergence benefits of manifold structure exploitation.
+
+### Scalability Analysis
+
+The scaling behavior of computational time with network size reveals critical insights for practical applications. **Dimensionality reduction methods demonstrate favorable scaling properties** than their higher-dimensional counterparts, with the growth rate of computation time increasing much more gradually with network size. This behavior directly reflects the reduced parameter space dimensionality, where DR operates on O(n) parameters compared to the O(n²) variables required by traditional doubly stochastic matrix approaches.
+
+**Traditional methods exhibit steeper computational scaling curves**, with Interior Point methods showing particularly pronounced increases in execution time for larger networks. 
+
+
+### Computational Efficiency versus Solution Quality Trade-offs
+
+The relationship between computational investment and solution quality varies significantly across methods, creating distinct efficiency frontiers for different application contexts. **Interior Point methods represent a high-cost, high-quality approach** suitable for applications where solution precision justifies substantial computational investment. The method's ability to achieve perfect symmetry recovery on structured networks and consistently superior performance across all test configurations may warrant the computational overhead in precision-critical applications.
+
+**QSA and Manifold methods occupy intermediate positions** in the efficiency-quality trade-off space, offering balanced approaches that may prove optimal for many practical applications. The moderate computational requirements combined with competitive solution quality make these methods suitable for applications requiring both reasonable performance and manageable computational costs.
+
+### Algorithmic Maturity and Implementation Effects
+
+The computational time analysis must be interpreted within the context of implementation sophistication and algorithmic maturity. **IPOPT represents a highly optimized, mature implementation** with decades of development focused on numerical efficiency and stability. The comparison with research-grade implementations of other methods may not fully capture the potential computational performance achievable with equivalent development investment.
+
+**Future optimization efforts** could potentially improve the computational characteristics of currently slower methods through algorithmic refinements, better numerical implementations, and exploitation of problem-specific structure. The current computational hierarchy should therefore be viewed as reflecting the current state of implementation rather than fundamental algorithmic limitations.
+
+### Conclusion
+
+The computational efficiency analysis reveals that method selection for approximate symmetry detection cannot be based solely on solution quality metrics but must incorporate computational constraints as a primary consideration. The substantial variation in computational requirements across methods creates distinct application niches where different approaches may prove optimal. Understanding these computational trade-offs is essential for practitioners seeking to deploy approximate symmetry detection methods in real-world applications with varying computational constraints and performance requirements.
+
+# Discussion and Conclusions {#sec-conclusions}
+
+## Hypothesis Validation
+
+Our experimental evaluation provides evidence regarding our initial hypotheses, though with important nuances :
+
+- Second-order optimization methods demonstrate superior performance compared to first-order approaches. The Interior Point method consistently achieves lower symmetry coefficients than QSA and MF across all test configurations. However, this advantage may result from the maturity and sophisticated implementation of IPOPT rather than purely from second-order information exploitation. The comparison may not be entirely fair given the simplistic implementations of our other methods versus the highly optimized commercial solver.
+
+- Contrary to conventional wisdom from Lyzinski et al., convex relaxation consistently outperforms indefinite relaxation for temperature-based methods. While we have not completely disproven the general principle, our data challenges the assumption that indefinite formulations universally yield superior solutions for matching problems. This unexpected finding suggests that the relationship between relaxation type and solution quality requires more nuanced understanding.
+
+- The dramatic dimensionality reduction in DR method and alternative relaxation of the OR method results in significantly degraded solution quality compared to methods operating on the full parameter space. The computational savings achieved through reduced parameterization come at a substantial performance cost.
+
+- Method performance rankings remain remarkably consistent across different network topologies and sizes, with IP > QSA > MF >> DR > OR holding throughout our experiments.
+
+## Method-Specific Performance Analysis
+
+### Iterative Methods
+
+**Interior Point (IP)** emerges as the strongest performer among all tested methods. IP consistently achieves the lowest symmetry coefficients across graph types and successfully recovers perfect symmetries in unperturbed LRM networks. However, IP requires higher penalty parameters (c ≥ 0.8) to avoid convergence to trivial identity solutions and exhibits occasionally erratic convergence patterns suggesting sensitivity to problem structure.
+
+**QSA** provides reliable baseline performance as the current state-of-the-art method. QSA demonstrates robustness against identity solutions even with low penalty values and exhibits predictable convergence behavior that scales appropriately with instance size. The method maintains good symmetry quality across all tested graph types, confirming its established position in the field.
+
+**Manifold (MF)** optimization demonstrates good convergence properties, rarely reaching iteration limits during optimization. While MF slightly underperforms IP and QSA in solution quality, the geometric structure of the manifold approach aids convergence reliability. The method's performance suggests potential for improvement through more sophisticated manifold optimization algorithms incorporating trust region methods or conjugate gradients, though such extensions require advanced theoretical development beyond this thesis scope.
+
+### Temperature-Based Methods
+
+**Dimensionality Reduction (DR)** and **Orthogonal Relaxation (OR)** both exhibit substantially inferior performance compared to iterative methods. The dramatic performance gap suggests that low-dimensional parameterization approaches sacrifice too much optimization flexibility. The theoretical elegance of these approaches fails to translate into competitive empirical performance.
+
+**Convex relaxation consistently outperforms indefinite relaxation** for both temperature-based methods, directly contradicting established preferences in graph matching literature. This finding challenges the assumption and suggests that relaxation choice should be considered jointly with the optimization algorithm.
+
+**Temperature annealing provides no performance benefit** and often degrades solution quality compared to carefully chosen fixed temperatures. While our exploration of annealing configurations was limited, the evidence suggests that additional scheduling complexity is not justified for these methods.
+
+## Theoretical Implications
+
+Several theoretical insights emerge from our empirical findings, though they
+require careful interpretation given study limitations:
+
+**Second-order information demonstrates value**, with IP's superior performance suggesting that incorporating curvature information provides significant advantages despite increased computational cost per iteration. However, this conclusion must be tempered by recognition that IPOPT's performance advantage may partially result from its sophisticated implementation rather than purely from second-order methods.
+
+**Geometric structure aids optimization convergence**, as evidenced by MF's good convergence properties. This validates the manifold optimization perspective, though superior convergence does not automatically translate to better solution quality. The approach shows promise for extension with more advanced manifold optimization algorithms.
+
+## Limitations and Future Work
+
+Our study contains several limitations that suggest important directions for future research:
+
+**Evaluation scope limitations** include focus on synthetic networks where ground truth can be controlled, though evaluation on real-world networks with domain-specific symmetry patterns would strengthen conclusions. Additionally, our use of fixed computational budgets may not reveal the full potential of methods that might benefit from adaptive stopping criteria.
+
+**Implementation fairness concerns** arise from comparing highly optimized commercial software (IPOPT) against research implementations. Future work should either implement all methods with similar optimization levels or develop more sophisticated versions of the simpler approaches to ensure fair comparison.
+
+**Parameter space exploration** was necessarily limited, and finer parameter grids might reveal optimal configurations not discovered in our analysis. Similarly, our single initialization strategy may not fully capture method-specific sensitivities to starting conditions.
+
+**Methodological extensions** represent promising research directions, including hybrid approaches combining the robustness of temperature-based methods with the solution quality of second-order methods. Investigation of why convex relaxations outperform indefinite formulations in temperature-based settings could provide valuable theoretical insights.
+
+## Conclusion
+
+This comprehensive evaluation establishes Interior Point methods as a strong candidate for the new state-of-the-art in approximate symmetry detection, though with important caveats about implementation fairness. By systematically comparing five distinct optimization paradigms across controlled experimental conditions, we demonstrate that sophisticated optimization approaches offer substantial advantages over current methods. Our finding that convex relaxations can outperform indefinite formulations challenges established theoretical preferences and suggests the need for more nuanced understanding of relaxation choice in graph matching problems.
+
+These findings have immediate practical implications for researchers working with network symmetries and broader theoretical implications for optimization method design in combinatorial graph problems. However, the results should be interpreted within the context of our study limitations, particularly regarding implementation sophistication and evaluation scope. Future work addressing these limitations while exploring hybrid approaches and real-world applications will be essential for fully establishing the practical value of these theoretical advances.

@@ -1,0 +1,592 @@
+---
+title: "Graph Symmetry Experiment Data Loader"
+author: "David Kubek"
+date: today
+format:
+  html:
+    toc: true
+    toc-depth: 3
+    code-fold: true
+    code-summary: "Show code"
+    code-line-numbers: true
+    code-annotations: hover
+execute:
+  warning: false
+  message: false
+---
+
+# Introduction
+
+This notebook provides a comprehensive pipeline for loading and preprocessing graph symmetry experiment results. The data is organized in a hierarchical directory structure with multiple methods, configurations, and graph instances.
+
+## Data Structure Overview
+
+The experiment results are organized as follows:
+- **Methods**: InteriorPoint, Manifold, QSA
+- **Configurations**: Different parameter settings for each method
+- **Graph Types**: BA, ER, LRM_ER_rewired
+- **Instances**: Multiple simulations for different node counts and densities
+- **Runs**: Multiple algorithm runs with different random initializations
+
+# Setup and Configuration
+
+```{python}
+#| label: imports
+#| code-summary: "Import required libraries"
+
+import json
+import pickle
+import re
+from pathlib import Path
+from typing import Dict, List, Any, Tuple, Optional
+
+import numpy as np
+import pandas as pd
+from IPython.display import display, Markdown
+
+# Suppress pandas warnings
+pd.options.mode.chained_assignment = None
+```
+
+```{python}
+#| label: configuration
+#| code-summary: "Configuration settings"
+
+# Directory paths
+RESULTS_DIR = Path("../results")
+DATA_DIR = Path("../data/pidnebesna")
+
+# Directory names
+METHOD_DIRS = ["InteriorPoint", "Manifold", "QSA"]
+GRAPH_TYPES = ["BA", "ER", "LRM_ER_rewired"]
+
+# Subdirectory names
+METRICS_SUBDIR = "Metrics"
+PERMUTATIONS_SUBDIR = "Permutations"
+CONFIG_FILE = "config.json"
+
+# File patterns
+INSTANCE_PATTERN = re.compile(
+    r"(?P<graph_type>\w+)_nNodes(?P<n_nodes>\d+)_density(?P<density>\d+)"
+    r"(?:_rew(?P<rew>\d+))?_sim(?P<sim_id>\d+)"
+)
+```
+
+# Helper Functions
+
+## File Parsing Functions
+
+```{python}
+#| label: parsing-functions
+#| code-summary: "Functions for parsing filenames and extracting metadata"
+
+def parse_instance_filename(filename: str) -> Optional[Dict[str, Any]]:
+    """
+    Parse instance filename to extract metadata.
+    
+    Args:
+        filename: Name of the file (without extension)
+        
+    Returns:
+        Dictionary with parsed metadata or None if parsing fails
+    """
+    match = INSTANCE_PATTERN.match(filename)
+    if not match:
+        return None
+    
+    data = match.groupdict()
+    # Convert numeric fields to integers
+    data['n_nodes'] = int(data['n_nodes'])
+    data['density'] = int(data['density'])
+    data['sim_id'] = int(data['sim_id'])
+    if data['rew'] is not None:
+        data['rew'] = int(data['rew'])
+    
+    return data
+
+
+def parse_config_dirname(dirname: str) -> Dict[str, Any]:
+    """
+    Parse configuration directory name to extract parameters.
+    
+    Args:
+        dirname: Name of the configuration directory
+        
+    Returns:
+        Dictionary with parsed parameters
+    """
+    # Extract c value
+    c_match = re.search(r"c(\d+(?:_\d+)?)", dirname)
+    if c_match:
+        c_str = c_match.group(1).replace('_', '.')
+        c_value = float(c_str)
+    else:
+        c_value = None
+    
+    # Extract other parameters from directory name
+    params = {'c': c_value, 'config_name': dirname}
+    
+    return params
+```
+
+## Data Loading Functions
+
+```{python}
+# | label: loading-functions
+# | code-summary: "Functions for loading different data types"
+
+
+def load_json_config(filepath: Path) -> Dict[str, Any]:
+    """Load configuration from JSON file."""
+    with open(filepath, "r") as f:
+        return json.load(f)
+
+
+def load_permutation_csv(filepath: Path) -> np.ndarray:
+    """
+    Load permutation data from CSV file.
+
+    Returns:
+        2D array where each column is a permutation from one run
+    """
+    return pd.read_csv(filepath, header=None).values
+
+
+def load_metrics_csv(filepath: Path) -> pd.DataFrame:
+    """Load metrics data from CSV file."""
+    return pd.read_csv(filepath)
+
+
+def load_graph_instance(
+    data_dir: Path,
+    graph_type: str,
+    n_nodes: int,
+    density: int,
+    sim_id: int,
+    rew: Optional[int] = None,
+) -> np.ndarray:
+    """
+    Load graph adjacency matrix from pickle file.
+
+    Args:
+        data_dir: Base data directory
+        graph_type: Type of graph (BA, ER, LRM_ER_rewired)
+        n_nodes: Number of nodes
+        density: Graph density
+        sim_id: Simulation ID
+        rew: Rewiring parameter (for LRM_ER only)
+
+    Returns:
+        Adjacency matrix as numpy array
+    """
+    # Handle different naming conventions
+    if graph_type == "LRM_ER":
+        graph_type_dir = "LRM_ER_rewired"
+        base_name = f"LRM_ER_nNodes{n_nodes}_density{density}_rew{rew}"
+    else:
+        graph_type_dir = graph_type
+        base_name = f"{graph_type}_nNodes{n_nodes}_density{density}"
+
+    pickle_path = data_dir / graph_type_dir / f"{base_name}.p"
+
+    if not pickle_path.exists():
+        raise FileNotFoundError(f"Graph instance file not found: {pickle_path}")
+
+    with open(pickle_path, "rb") as f:
+        data = pickle.load(f)
+
+    # The pickle file contains a dictionary with sim_id as keys
+    if sim_id not in data:
+        raise KeyError(f"Simulation {sim_id} not found in {pickle_path}")
+
+    return data[sim_id]
+```
+
+## Metric Computation Functions
+
+```{python}
+#| label: metric-functions
+#| code-summary: "Functions for computing evaluation metrics"
+
+def compute_error(A: np.ndarray, perm: np.ndarray) -> float:
+    """
+    Compute error E(A) = 1/4 * ||A - P @ A @ P.T||_F^2
+    
+    Args:
+        A: Adjacency matrix
+        perm: Permutation vector
+    
+    Returns:
+        error value
+    """
+    n = len(perm)
+    P = np.eye(n)[perm]  # Convert permutation vector to matrix # <1>
+    return 1/4 * np.linalg.norm(A - P @ A @ P.T, 'fro') ** 2
+
+
+def compute_symmetry(A: np.ndarray, perm: np.ndarray) -> float:
+    """
+    Compute symmetry S(A) = 4*E/(N*(N-1))
+    
+    Args:
+        A: Adjacency matrix
+        perm: Permutation vector
+    
+    Returns:
+        Symmetry value
+    """
+    n = len(perm)
+    E = compute_error(A, perm)
+    return 4 * E / (n * (n - 1))
+
+
+def count_fixed_points(perm: np.ndarray) -> int:
+    """Count the number of fixed points in a permutation."""
+    return np.sum(np.arange(len(perm)) == perm)
+```
+
+1. Creates a permutation matrix from the permutation vector using advanced indexing
+
+# Data Loading Pipeline
+
+## Main Processing Function
+
+```{python}
+#| label: process-experiment
+#| code-summary: "Function to process a single experiment"
+
+def process_experiment(method_dir: Path, config_dir: Path, 
+                      graph_type: str, instance_file: Path,
+                      data_dir: Path) -> List[Dict[str, Any]]:
+    """
+    Process a single experiment instance.
+    
+    Args:
+        method_dir: Path to method directory
+        config_dir: Path to configuration directory
+        graph_type: Type of graph
+        instance_file: Path to instance file
+        data_dir: Path to data directory
+        
+    Returns:
+        List of dictionaries, one per run
+    """
+    # Parse instance filename
+    instance_name = instance_file.stem
+    instance_info = parse_instance_filename(instance_name)
+    
+    if instance_info is None:
+        print(f"Warning: Could not parse filename {instance_name}")
+        return []
+    
+    # Load configuration
+    config_path = config_dir / CONFIG_FILE
+    config = load_json_config(config_path)
+    
+    # Parse configuration directory name
+    config_params = parse_config_dirname(config_dir.name)
+    
+    # Load permutations
+    perm_path = config_dir / graph_type / PERMUTATIONS_SUBDIR / f"{instance_name}.csv"
+    if not perm_path.exists():
+        raise FileNotFoundError(f"Permutation file not found: {perm_path}")
+    
+    permutations = load_permutation_csv(perm_path)
+    n_runs = permutations.shape[1]
+    
+    # Load metrics
+    metrics_path = config_dir / graph_type / METRICS_SUBDIR / f"{instance_name}.csv"
+    if not metrics_path.exists():
+        raise FileNotFoundError(f"Metrics file not found: {metrics_path}")
+    
+    metrics_df = load_metrics_csv(metrics_path)
+    
+    # Load graph instance
+    adj_matrix = load_graph_instance(
+        data_dir, 
+        instance_info['graph_type'],
+        instance_info['n_nodes'],
+        instance_info['density'],
+        instance_info['sim_id'],
+        instance_info.get('rew')
+    )
+    
+    # Process each run
+    results = []
+    for run_id in range(n_runs):
+        # Get permutation for this run
+        perm = permutations[:, run_id]
+        
+        # Compute metrics
+        error = compute_error(adj_matrix, perm)
+        symmetry = compute_symmetry(adj_matrix, perm)
+        fixed_points = count_fixed_points(perm)
+        
+        # Build result dictionary
+        result = {
+            # Method and configuration
+            'method': config['method'],
+            'config_name': config_params['config_name'],
+            'c': config.get('c', config_params['c']),  # <2>
+            
+            # Graph instance information
+            'graph_type': instance_info['graph_type'],
+            'n_nodes': instance_info['n_nodes'],
+            'density': instance_info['density'],
+            'sim_id': instance_info['sim_id'],
+            'rew': instance_info.get('rew'),
+            
+            # Run information
+            'run_id': run_id,
+            'num_runs': config.get('num_runs', n_runs),
+            
+            # Computed metrics
+            'error': error,
+            'symmetry': symmetry,
+            'fixed_points': fixed_points,
+            
+            # Permutation (as list)
+            #'permutation': perm.tolist()
+        }
+        
+        # Add method-specific configuration
+        method_config = config.get('method_config', {})
+        for key, value in method_config.items():
+            result[f'method_{key}'] = value
+        
+        # Add metrics from file
+        if run_id < len(metrics_df):
+            metrics_row = metrics_df.iloc[run_id]
+            for col in metrics_df.columns:
+                if col != 'run_id':  # Avoid duplicate
+                    result[f'metric_{col}'] = metrics_row[col]
+        
+        results.append(result)
+    
+    return results
+```
+
+2. Use c from config if available, otherwise use parsed value from directory name
+
+## Main Data Loading Function
+
+```{python}
+#| label: load-all-data
+#| code-summary: "Main function to load all experiment data"
+#| code-line-numbers: true
+
+
+def load_all_data(results_dir: Path, data_dir: Path) -> pd.DataFrame:
+    """
+    Load all experiment data into a single DataFrame.
+
+    Args:
+        results_dir: Path to results directory
+        data_dir: Path to data directory
+
+    Returns:
+        DataFrame with all experiment results
+    """
+    all_results = []
+    total_experiments = 0
+
+    # Iterate through methods
+    for method_name in METHOD_DIRS:
+        method_dir = results_dir / method_name
+        if not method_dir.exists():
+            print(f"Warning: Method directory not found: {method_dir}")
+            continue
+
+        print(f"\nProcessing method: {method_name}")
+
+        # Iterate through configurations
+        config_dirs = [d for d in method_dir.iterdir() if d.is_dir()]
+        for config_dir in sorted(config_dirs):
+            print(f"  Configuration: {config_dir.name}")
+
+            # Iterate through graph types
+            for graph_type in GRAPH_TYPES:
+                graph_dir = config_dir / graph_type
+                if not graph_dir.exists():
+                    continue
+
+                # Find all instance files in Permutations directory
+                perm_dir = graph_dir / PERMUTATIONS_SUBDIR
+                if not perm_dir.exists():
+                    continue
+
+                instance_files = list(perm_dir.glob("*.csv"))
+                print(f"    {graph_type}: {len(instance_files)} instances")
+
+                # Process each instance
+                for instance_file in instance_files:
+                    try:
+                        results = process_experiment(
+                            method_dir, config_dir, graph_type, instance_file, data_dir
+                        )
+                        all_results.extend(results)
+                        total_experiments += 1
+                    except Exception as e:
+                        print(f"      Error processing {instance_file.name}: {e}")
+                        raise  # Re-raise to fail fast as requested
+
+    print(f"\nTotal experiments processed: {total_experiments}")
+    print(f"Total rows in dataset: {len(all_results)}")
+
+    # Create DataFrame
+    df = pd.DataFrame(all_results)
+
+    # Sort columns for better organization
+    base_cols = [
+        "method",
+        "config_name",
+        "c",
+        "graph_type",
+        "n_nodes",
+        "density",
+        "rew",
+        "sim_id",
+        "run_id",
+        "num_runs",
+    ]
+    metric_cols = ["error", "symmetry", "fixed_points"]
+    method_cols = [col for col in df.columns if col.startswith("method_")]
+    file_metric_cols = [col for col in df.columns if col.startswith("metric_")]
+    other_cols = [
+        col
+        for col in df.columns
+        if col not in base_cols + metric_cols + method_cols + file_metric_cols
+    ]
+
+    ordered_cols = (
+        base_cols
+        + metric_cols
+        + sorted(method_cols)
+        + sorted(file_metric_cols)
+        + sorted(other_cols)
+    )
+
+    # Ensure all columns exist
+    ordered_cols = [col for col in ordered_cols if col in df.columns]
+    df = df[ordered_cols]
+
+    return df
+```
+
+# Load Data
+
+```{python}
+#| label: load-data
+#| code-summary: "Load all experiment data"
+
+# Load all data
+print("Loading experiment data...")
+df = load_all_data(RESULTS_DIR, DATA_DIR)
+
+# Display basic information
+print(f"\nDataFrame shape: {df.shape}")
+print(f"Memory usage: {df.memory_usage(deep=True).sum() / 1024**2:.2f} MB")
+```
+
+# Data Summary
+
+## Basic Statistics
+
+```{python}
+#| label: summary-stats
+#| code-summary: "Display summary statistics"
+
+# Summary by method
+method_summary = df.groupby('method').agg({
+    'config_name': 'nunique',
+    'graph_type': 'nunique', 
+    'sim_id': 'count',
+    'error': ['mean', 'std', 'min', 'max'],
+    'symmetry': ['mean', 'std', 'min', 'max'],
+    'fixed_points': ['mean', 'std', 'min', 'max']
+}).round(4)
+
+display(Markdown("### Summary by Method"))
+display(method_summary)
+
+# Summary by graph type
+graph_summary = df.groupby(['graph_type', 'n_nodes', 'density']).agg({
+    'sim_id': 'nunique',
+    'error': 'mean',
+    'symmetry': 'mean',
+    'fixed_points': 'mean'
+}).round(4)
+
+display(Markdown("### Summary by Graph Type"))
+display(graph_summary)
+```
+
+## Configuration Overview
+
+```{python}
+#| label: config-overview
+#| code-summary: "Display configuration parameters used"
+
+# Extract unique configurations
+config_cols = ['method', 'config_name', 'c'] + [col for col in df.columns if col.startswith('method_')]
+unique_configs = df[config_cols].drop_duplicates().sort_values(['method', 'c'])
+
+display(Markdown("### Unique Configurations"))
+display(unique_configs)
+```
+
+## Data Quality Check
+
+```{python}
+#| label: data-quality
+#| code-summary: "Check for missing values and data consistency"
+
+# Check for missing values
+missing_counts = df.isnull().sum()
+missing_pct = (missing_counts / len(df) * 100).round(2)
+
+missing_summary = pd.DataFrame({
+    'missing_count': missing_counts[missing_counts > 0],
+    'missing_pct': missing_pct[missing_counts > 0]
+}).sort_values('missing_count', ascending=False)
+
+if len(missing_summary) > 0:
+    display(Markdown("### Missing Values"))
+    display(missing_summary)
+else:
+    print("No missing values found in the dataset!")
+
+# Check permutation lengths
+# perm_lengths = df['permutation'].apply(len)
+# display(Markdown("### Permutation Length Distribution"))
+# display(perm_lengths.value_counts().sort_index())
+```
+
+# Save Processed Data
+
+```{python}
+#| label: save-data
+#| code-summary: "Save processed data for future use"
+
+# Save to multiple formats
+output_dir = Path("processed_data")
+output_dir.mkdir(exist_ok=True)
+
+# Save as pickle (preserves all data types including lists)
+df.to_pickle(output_dir / "graph_symmetry_results.pkl")
+print(f"Saved pickle file: {output_dir / 'graph_symmetry_results.pkl'}")
+
+# Save as CSV (note: permutation column will be string representation)
+df.to_csv(output_dir / "graph_symmetry_results.csv", index=False)
+print(f"Saved CSV file: {output_dir / 'graph_symmetry_results.csv'}")
+
+# Save summary statistics
+# with pd.ExcelWriter(output_dir / "graph_symmetry_summary.xlsx") as writer:
+#     method_summary.to_excel(writer, sheet_name='Method Summary')
+#     graph_summary.to_excel(writer, sheet_name='Graph Summary')
+#     unique_configs.to_excel(writer, sheet_name='Configurations', index=False)
+#     if len(missing_summary) > 0:
+#         missing_summary.to_excel(writer, sheet_name='Missing Values')
+# 
+# print(f"Saved summary Excel file: {output_dir / 'graph_symmetry_summary.xlsx'}")
+```

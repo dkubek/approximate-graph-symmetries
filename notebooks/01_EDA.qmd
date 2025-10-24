@@ -1,0 +1,554 @@
+---
+title: "Graph Symmetry Exploratory Data Analysis"
+author: "David Kubek"
+date: today
+format:
+  html:
+    toc: true
+    toc-depth: 3
+    code-fold: true
+    code-summary: "Show code"
+    code-line-numbers: true
+    code-annotations: hover
+execute:
+  warning: false
+  message: false
+---
+
+
+# Exploratory Data Analysis
+
+## Visualization Setup
+
+```{python}
+#| label: viz-setup
+#| code-summary: "Setup for visualizations"
+
+import seaborn as sns
+import matplotlib.pyplot as plt
+from matplotlib.gridspec import GridSpec
+import warnings
+warnings.filterwarnings('ignore', category=FutureWarning)
+
+# Set visualization style
+sns.set_style("whitegrid")
+sns.set_palette("husl")
+plt.rcParams['figure.figsize'] = (10, 6)
+plt.rcParams['figure.dpi'] = 100
+plt.rcParams['font.size'] = 10
+
+# Color palette for methods
+method_colors = {
+    'InteriorPoint': '#1f77b4',
+    'Manifold': '#ff7f0e', 
+    'QSA': '#2ca02c'
+}
+```
+
+## Distribution Analysis
+
+### error Distribution by Method
+
+```{python}
+#| label: error-distribution
+#| code-summary: "Analyze error distribution across methods"
+#| fig-cap: "Distribution of error values by optimization method"
+
+fig, axes = plt.subplots(1, 2, figsize=(14, 5))
+
+# Violin plot
+ax1 = axes[0]
+sns.violinplot(data=df, x='method', y='error', ax=ax1, palette=method_colors)
+ax1.set_title('error Distribution by Method', fontsize=14, fontweight='bold')
+ax1.set_ylabel('error', fontsize=12)
+ax1.set_xlabel('Method', fontsize=12)
+
+# Log scale for better visualization
+ax2 = axes[1]
+sns.violinplot(data=df, x='method', y='error', ax=ax2, palette=method_colors)
+ax2.set_yscale('log')
+ax2.set_title('error Distribution (Log Scale)', fontsize=14, fontweight='bold')
+ax2.set_ylabel('error (log scale)', fontsize=12)
+ax2.set_xlabel('Method', fontsize=12)
+
+plt.tight_layout()
+plt.show()
+
+# Statistical summary
+error_stats = df.groupby('method')['error'].describe()
+display(Markdown("### error Statistics by Method"))
+display(error_stats)
+```
+
+### Symmetry Score Analysis
+
+```{python}
+#| label: symmetry-analysis
+#| code-summary: "Analyze symmetry scores across graph types"
+#| fig-cap: "Symmetry scores by graph type and method"
+
+# Create faceted plot
+g = sns.FacetGrid(df, col='graph_type', height=5, aspect=1.2)
+g.map_dataframe(sns.boxplot, x='method', y='symmetry', palette=method_colors)
+g.set_titles(col_template="{col_name} Graphs", fontsize=14, fontweight='bold')
+g.set_axis_labels("Method", "Symmetry Score")
+
+# Rotate x-axis labels
+for ax in g.axes.flat:
+    ax.tick_params(axis='x', rotation=15)
+
+plt.suptitle('Symmetry Scores by Graph Type and Method', y=1.02, fontsize=16, fontweight='bold')
+plt.tight_layout()
+plt.show()
+```
+
+### Fixed Points Distribution
+
+```{python}
+#| label: fixed-points-dist
+#| code-summary: "Distribution of fixed points in permutations"
+#| fig-cap: "Fixed points distribution across different graph sizes"
+
+# Group by graph size
+fig, axes = plt.subplots(1, 3, figsize=(15, 5), sharey=True)
+
+for idx, n_nodes in enumerate(sorted(df['n_nodes'].unique())):
+    ax = axes[idx]
+    data_subset = df[df['n_nodes'] == n_nodes]
+    
+    # Create histogram with KDE
+    for method in METHOD_DIRS:
+        method_data = data_subset[data_subset['method'] == method]['fixed_points']
+        ax.hist(method_data, bins=20, alpha=0.6, density=True, 
+                label=method, color=method_colors[method])
+    
+    ax.set_title(f'n_nodes = {n_nodes}', fontsize=14, fontweight='bold')
+    ax.set_xlabel('Number of Fixed Points', fontsize=12)
+    if idx == 0:
+        ax.set_ylabel('Density', fontsize=12)
+    ax.legend()
+    ax.grid(True, alpha=0.3)
+
+plt.suptitle('Distribution of Fixed Points by Graph Size', fontsize=16, fontweight='bold')
+plt.tight_layout()
+plt.show()
+```
+
+## Parameter Effects Analysis
+
+### Effect of c Parameter
+
+```{python}
+#| label: c-parameter-effect
+#| code-summary: "Analyze the effect of c parameter on performance"
+#| fig-cap: "Impact of c parameter on error and symmetry"
+
+fig, axes = plt.subplots(2, 1, figsize=(12, 10), sharex=True)
+
+# error vs c
+ax1 = axes[0]
+for method in METHOD_DIRS:
+    method_data = df[df['method'] == method].groupby('c')['error'].agg(['mean', 'std'])
+    ax1.errorbar(method_data.index, method_data['mean'], yerr=method_data['std'],
+                 marker='o', label=method, color=method_colors[method], 
+                 capsize=5, linewidth=2, markersize=8)
+
+ax1.set_ylabel('Mean error', fontsize=12)
+ax1.set_title('Effect of c Parameter on error', fontsize=14, fontweight='bold')
+ax1.legend()
+ax1.grid(True, alpha=0.3)
+ax1.set_yscale('log')
+
+# Symmetry vs c  
+ax2 = axes[1]
+for method in METHOD_DIRS:
+    method_data = df[df['method'] == method].groupby('c')['symmetry'].agg(['mean', 'std'])
+    ax2.errorbar(method_data.index, method_data['mean'], yerr=method_data['std'],
+                 marker='s', label=method, color=method_colors[method],
+                 capsize=5, linewidth=2, markersize=8)
+
+ax2.set_xlabel('c Parameter', fontsize=12)
+ax2.set_ylabel('Mean Symmetry', fontsize=12)
+ax2.set_title('Effect of c Parameter on Symmetry', fontsize=14, fontweight='bold')
+ax2.legend()
+ax2.grid(True, alpha=0.3)
+
+plt.tight_layout()
+plt.show()
+```
+
+### Iteration and Time Analysis
+
+```{python}
+#| label: iteration-time-analysis
+#| code-summary: "Analyze computational efficiency"
+#| fig-cap: "Iterations and computation time by method"
+
+# Check which metric columns exist
+iter_col = 'metric_iterations' if 'metric_iterations' in df.columns else None
+time_col = 'metric_time' if 'metric_time' in df.columns else None
+
+if iter_col and time_col:
+    fig, axes = plt.subplots(1, 2, figsize=(14, 6))
+    
+    # Iterations distribution
+    ax1 = axes[0]
+    sns.boxplot(data=df, x='method', y=iter_col, ax=ax1, palette=method_colors)
+    ax1.set_title('Iterations by Method', fontsize=14, fontweight='bold')
+    ax1.set_ylabel('Number of Iterations', fontsize=12)
+    ax1.set_xlabel('Method', fontsize=12)
+    
+    # Time distribution
+    ax2 = axes[1]
+    sns.boxplot(data=df, x='method', y=time_col, ax=ax2, palette=method_colors)
+    ax2.set_title('Computation Time by Method', fontsize=14, fontweight='bold')
+    ax2.set_ylabel('Time (seconds)', fontsize=12)
+    ax2.set_xlabel('Method', fontsize=12)
+    
+    plt.tight_layout()
+    plt.show()
+    
+    # Efficiency analysis
+    if iter_col and time_col:
+        df['time_per_iteration'] = df[time_col] / df[iter_col]
+        efficiency_stats = df.groupby('method')['time_per_iteration'].describe()
+        display(Markdown("### Time per Iteration Statistics"))
+        display(efficiency_stats)
+else:
+    print("Note: Iteration and time metrics not found in the dataset")
+```
+
+## Correlation Analysis
+
+### Metric Correlations
+
+```{python}
+#| label: correlation-analysis
+#| code-summary: "Analyze correlations between metrics"
+#| fig-cap: "Correlation heatmap of key metrics"
+
+# Select numeric columns for correlation
+metric_cols = ['error', 'symmetry', 'fixed_points', 'n_nodes', 'density', 'c']
+if 'metric_iterations' in df.columns:
+    metric_cols.append('metric_iterations')
+if 'metric_time' in df.columns:
+    metric_cols.append('metric_time')
+
+# Calculate correlations by method
+fig, axes = plt.subplots(1, 3, figsize=(18, 5))
+
+for idx, method in enumerate(METHOD_DIRS):
+    ax = axes[idx]
+    method_data = df[df['method'] == method][metric_cols].corr()
+    
+    sns.heatmap(method_data, annot=True, fmt='.2f', cmap='coolwarm', 
+                center=0, square=True, ax=ax, cbar_kws={'label': 'Correlation'})
+    ax.set_title(f'{method} Correlations', fontsize=14, fontweight='bold')
+    ax.set_xticklabels(ax.get_xticklabels(), rotation=45, ha='right')
+
+plt.suptitle('Correlation Analysis by Method', fontsize=16, fontweight='bold')
+plt.tight_layout()
+plt.show()
+```
+
+### Performance vs Graph Properties
+
+```{python}
+#| label: performance-vs-properties
+#| code-summary: "Analyze how graph properties affect performance"
+#| fig-cap: "Performance metrics versus graph properties"
+
+fig = plt.figure(figsize=(15, 10))
+gs = GridSpec(2, 2, figure=fig, hspace=0.3, wspace=0.25)
+
+# error vs nodes
+ax1 = fig.add_subplot(gs[0, 0])
+sns.scatterplot(data=df, x='n_nodes', y='error', hue='method', 
+                style='graph_type', s=50, alpha=0.6, ax=ax1, palette=method_colors)
+ax1.set_yscale('log')
+ax1.set_title('error vs Number of Nodes', fontsize=14, fontweight='bold')
+ax1.set_xlabel('Number of Nodes', fontsize=12)
+ax1.set_ylabel('error (log scale)', fontsize=12)
+ax1.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
+
+# error vs density
+ax2 = fig.add_subplot(gs[0, 1])
+sns.boxplot(data=df, x='density', y='error', hue='method', ax=ax2, palette=method_colors)
+ax2.set_yscale('log')
+ax2.set_title('error vs Graph Density', fontsize=14, fontweight='bold')
+ax2.set_xlabel('Density', fontsize=12)
+ax2.set_ylabel('error (log scale)', fontsize=12)
+
+# Fixed points ratio vs nodes
+ax3 = fig.add_subplot(gs[1, 0])
+df['fixed_points_ratio'] = df['fixed_points'] / df['n_nodes']
+sns.scatterplot(data=df, x='n_nodes', y='fixed_points_ratio', hue='method',
+                style='graph_type', s=50, alpha=0.6, ax=ax3, palette=method_colors)
+ax3.set_title('Fixed Points Ratio vs Number of Nodes', fontsize=14, fontweight='bold')
+ax3.set_xlabel('Number of Nodes', fontsize=12)
+ax3.set_ylabel('Fixed Points / Total Nodes', fontsize=12)
+ax3.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
+
+# Symmetry vs density
+ax4 = fig.add_subplot(gs[1, 1])
+sns.boxplot(data=df, x='density', y='symmetry', hue='method', ax=ax4, palette=method_colors)
+ax4.set_title('Symmetry vs Graph Density', fontsize=14, fontweight='bold')
+ax4.set_xlabel('Density', fontsize=12)
+ax4.set_ylabel('Symmetry Score', fontsize=12)
+
+plt.suptitle('Performance Metrics vs Graph Properties', fontsize=16, fontweight='bold')
+plt.tight_layout()
+plt.show()
+```
+
+## Configuration Comparison
+
+### Best Configurations Analysis
+
+```{python}
+#| label: best-configs
+#| code-summary: "Identify and visualize best performing configurations"
+#| fig-cap: "Top performing configurations by method"
+
+# Find best configurations by error
+best_configs_error = (df.groupby(['method', 'config_name'])
+                       .agg({'error': ['mean', 'std', 'count']})
+                       .sort_values(('error', 'mean'))
+                       .groupby(level=0)
+                       .head(3))
+
+# Visualize top configurations
+fig, ax = plt.subplots(figsize=(12, 8))
+
+# Prepare data for plotting
+plot_data = []
+for (method, config), row in best_configs_error.iterrows():
+    plot_data.append({
+        'method': method,
+        'config': config,
+        'mean_error': row[('error', 'mean')],
+        'std_error': row[('error', 'std')]
+    })
+
+plot_df = pd.DataFrame(plot_data)
+
+# Create grouped bar plot
+x = np.arange(len(plot_df))
+width = 0.35
+
+bars = ax.bar(x, plot_df['mean_error'], width, yerr=plot_df['std_error'],
+               capsize=5, color=[method_colors[m] for m in plot_df['method']])
+
+# Customize plot
+ax.set_ylabel('Mean error', fontsize=12)
+ax.set_title('Top 3 Configurations per Method (Lowest error)', fontsize=14, fontweight='bold')
+ax.set_xticks(x)
+ax.set_xticklabels([f"{row['method']}\n{row['config'][:20]}" for _, row in plot_df.iterrows()],
+                   rotation=45, ha='right')
+ax.set_yscale('log')
+ax.grid(True, alpha=0.3, axis='y')
+
+plt.tight_layout()
+plt.show()
+
+display(Markdown("### Best Configurations by error"))
+display(best_configs_error)
+```
+
+### Method Performance Summary
+
+```{python}
+#| label: method-summary
+#| code-summary: "Comprehensive method performance comparison"
+#| fig-cap: "Overall method performance comparison"
+
+# Create comprehensive comparison
+summary_stats = df.groupby('method').agg({
+    'error': ['mean', 'median', 'std', 'min'],
+    'symmetry': ['mean', 'median', 'std', 'min'],
+    'fixed_points': ['mean', 'median'],
+    'run_id': 'count'
+}).round(4)
+
+# Rename columns for clarity
+summary_stats.columns = ['_'.join(col).strip() for col in summary_stats.columns.values]
+summary_stats.rename(columns={'run_id_count': 'total_runs'}, inplace=True)
+
+display(Markdown("### Comprehensive Method Performance Summary"))
+display(summary_stats)
+
+# Visualize key metrics
+fig, axes = plt.subplots(2, 2, figsize=(14, 10))
+
+metrics_to_plot = [
+    ('error_mean', 'Mean error', True),
+    ('symmetry_mean', 'Mean Symmetry', False),
+    ('error_min', 'Best error', True),
+    ('symmetry_min', 'Best Symmetry', False)
+]
+
+for idx, (metric, title, use_log) in enumerate(metrics_to_plot):
+    ax = axes[idx // 2, idx % 2]
+    
+    values = summary_stats[metric].values
+    methods = summary_stats.index
+    colors = [method_colors[m] for m in methods]
+    
+    bars = ax.bar(methods, values, color=colors)
+    ax.set_title(title, fontsize=14, fontweight='bold')
+    ax.set_ylabel(title, fontsize=12)
+    
+    if use_log:
+        ax.set_yscale('log')
+    
+    # Add value labels on bars
+    for bar, value in zip(bars, values):
+        height = bar.get_height()
+        ax.text(bar.get_x() + bar.get_width()/2., height,
+                f'{value:.2e}' if value < 0.01 else f'{value:.3f}',
+                ha='center', va='bottom', fontsize=10)
+    
+    ax.grid(True, alpha=0.3, axis='y')
+
+plt.suptitle('Method Performance Overview', fontsize=16, fontweight='bold')
+plt.tight_layout()
+plt.show()
+```
+
+## Graph Type Analysis
+
+### Performance by Graph Type
+
+```{python}
+#| label: graph-type-performance
+#| code-summary: "Compare performance across different graph types"
+#| fig-cap: "Performance comparison across graph types"
+
+# Aggregate by graph type and method
+graph_performance = df.groupby(['graph_type', 'method']).agg({
+    'error': ['mean', 'std'],
+    'symmetry': ['mean', 'std'],
+    'fixed_points_ratio': ['mean', 'std']
+}).round(4)
+
+# Create subplots for each metric
+fig, axes = plt.subplots(1, 3, figsize=(18, 6))
+
+metrics = ['error', 'symmetry', 'fixed_points_ratio']
+titles = ['error', 'Symmetry', 'Fixed Points Ratio']
+
+for idx, (metric, title) in enumerate(zip(metrics, titles)):
+    ax = axes[idx]
+    
+    # Prepare data for plotting
+    data_to_plot = graph_performance[metric]['mean'].unstack()
+    error_data = graph_performance[metric]['std'].unstack()
+    
+    # Create grouped bar plot
+    data_to_plot.plot(kind='bar', ax=ax, color=[method_colors[m] for m in data_to_plot.columns],
+                      yerr=error_data, capsize=5)
+    
+    ax.set_title(f'{title} by Graph Type', fontsize=14, fontweight='bold')
+    ax.set_xlabel('Graph Type', fontsize=12)
+    ax.set_ylabel(f'Mean {title}', fontsize=12)
+    ax.legend(title='Method')
+    ax.grid(True, alpha=0.3, axis='y')
+    
+    if metric == 'error':
+        ax.set_yscale('log')
+    
+    # Rotate x labels
+    ax.set_xticklabels(ax.get_xticklabels(), rotation=0)
+
+plt.suptitle('Performance Metrics by Graph Type', fontsize=16, fontweight='bold')
+plt.tight_layout()
+plt.show()
+```
+
+## Statistical Tests
+
+### Performance Significance Testing
+
+```{python}
+#| label: statistical-tests
+#| code-summary: "Statistical comparison of methods"
+
+from scipy import stats
+
+# Perform pairwise comparisons for error
+display(Markdown("### Statistical Significance Tests (error)"))
+display(Markdown("Kruskal-Wallis H-test for differences between methods:"))
+
+# Kruskal-Wallis test
+error_by_method = [df[df['method'] == m]['error'].values for m in METHOD_DIRS]
+h_stat, p_value = stats.kruskal(*error_by_method)
+print(f"H-statistic: {h_stat:.4f}, p-value: {p_value:.4e}")
+
+if p_value < 0.05:
+    display(Markdown("#### Post-hoc Pairwise Mann-Whitney U Tests:"))
+    
+    # Pairwise comparisons
+    from itertools import combinations
+    
+    pairwise_results = []
+    for method1, method2 in combinations(METHOD_DIRS, 2):
+        data1 = df[df['method'] == method1]['error'].values
+        data2 = df[df['method'] == method2]['error'].values
+        
+        u_stat, p_val = stats.mannwhitneyu(data1, data2, alternative='two-sided')
+        
+        pairwise_results.append({
+            'Comparison': f"{method1} vs {method2}",
+            'U-statistic': u_stat,
+            'p-value': p_val,
+            'Significant': 'Yes' if p_val < 0.05 else 'No'
+        })
+    
+    pairwise_df = pd.DataFrame(pairwise_results)
+    display(pairwise_df)
+```
+
+## Key Findings Summary
+
+```{python}
+#| label: key-findings
+#| code-summary: "Summarize key findings from EDA"
+
+findings = []
+
+# Best overall method
+best_method = df.groupby('method')['error'].mean().idxmin()
+best_error = df.groupby('method')['error'].mean().min()
+findings.append(f"**Best performing method**: {best_method} (mean error: {best_error:.4f})")
+
+# Most consistent method
+most_consistent = df.groupby('method')['error'].std().idxmin()
+findings.append(f"**Most consistent method**: {most_consistent} (lowest error std deviation)")
+
+# Effect of graph size
+size_correlation = df[['n_nodes', 'error']].corr().iloc[0, 1]
+findings.append(f"**Graph size effect**: Correlation between n_nodes and error: {size_correlation:.3f}")
+
+# Best configuration overall
+best_config_row = df.loc[df['error'].idxmin()]
+findings.append(f"**Best single result**: {best_config_row['method']} on {best_config_row['graph_type']} "
+                f"graph (n={best_config_row['n_nodes']}, error={best_config_row['error']:.6f})")
+
+# Display findings
+display(Markdown("### Key Findings from Exploratory Data Analysis"))
+for finding in findings:
+    display(Markdown(f"- {finding}"))
+
+# Additional insights
+if 'metric_iterations' in df.columns:
+    fastest_method = df.groupby('method')['metric_time'].mean().idxmin()
+    display(Markdown(f"- **Fastest method**: {fastest_method} (on average)"))
+
+display(Markdown("\n### Recommendations for Further Analysis"))
+display(Markdown("""
+- Investigate why certain configurations perform significantly better
+- Analyze the relationship between convergence speed and solution quality
+- Study the impact of graph structure (beyond size and density) on algorithm performance
+- Consider ensemble approaches combining strengths of different methods
+"""))
+```
