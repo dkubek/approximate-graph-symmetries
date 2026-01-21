@@ -17,7 +17,7 @@ The key advantage is leveraging a mature, highly-optimized solver capable of
 handling non-convex problems and exploiting sparsity in the problem's derivatives.
 
 Reference:
-    Wächter, A., & Biegler, L. T. (2006). "On the implementation of an
+    Waechter, A., & Biegler, L. T. (2006). "On the implementation of an
     interior-point filter line-search algorithm for large-scale nonlinear
     programming." Mathematical programming.
 """
@@ -79,7 +79,7 @@ class InteriorPoint:
 
         self._setup_jacobian_sparsity()
 
-        # Hessian sparsity pattern: A ⊗ A + A^T ⊗ A^T
+        # Hessian sparsity pattern: A (x) A + A^T (x) A^T
         self._setup_hessian_sparsity()
 
     def _setup_jacobian_sparsity(self):

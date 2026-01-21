@@ -67,7 +67,7 @@ class DoublyStochastic(Manifold):
 
     This manifold consists of matrices where all entries are positive, and each
     row and column sums to 1. It represents the relative interior of the
-    Birkhoff polytope and has a dimension of (n-1)².
+    Birkhoff polytope and has a dimension of (n-1)^2.
 
     The Riemannian metric used is the Fisher information metric:
     `<U, V>_X = sum_ij (U_ij * V_ij / X_ij)`
@@ -254,7 +254,7 @@ class DoublyStochastic(Manifold):
         Z1 = b[:n]  # Corresponds to Z1 in the paper
         ZT1 = b[n:]  # Corresponds to Z^T 1 in the paper
 
-        # The system for α is: (I - XX^T)α = Z1 - X(Z^T 1)
+        # The system for alpha is: (I - XX^T)alpha = Z1 - X(Z^T 1)
         # The matrix (I - XX^T) is singular, so we must use the pseudoinverse.
         I_minus_XXT = np.eye(n) - point @ point.T
 
@@ -262,7 +262,7 @@ class DoublyStochastic(Manifold):
         alpha = np.linalg.pinv(I_minus_XXT) @ (Z1 - point @ ZT1)
 
         # Solve for beta using alpha
-        # β = Z^T 1 - X^T α
+        # beta = Z^T 1 - X^T alpha
         beta = ZT1 - point.T @ alpha
 
         return alpha, beta
@@ -304,7 +304,7 @@ class DoublyStochastic(Manifold):
 
     def _linear_solve_lsqr(self, point, b):
         """
-        Solves for α and β using the iterative LSQR algorithm.
+        Solves for alpha and beta using the iterative LSQR algorithm.
         This is more efficient than pinv for very large, structured systems
         as it avoids forming the n x n system matrix.
         """
@@ -362,10 +362,6 @@ class DoublyStochastic(Manifold):
         # For this manifold, we use retraction as approximation
 
         print("exp", tangent_vector)
-        if np.isnan(np.sum(tangent_vector)):
-            import pdb
-
-            pdb.set_trace()
 
         return self.retraction(point, tangent_vector)
 

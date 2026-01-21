@@ -148,11 +148,11 @@ class QSA:
             P_prev = P.copy()
 
             # Step 1: Compute gradient
-            # ∇f(P) = -APA^T - A^T PA + diag(c)
+            # grad f(P) = -APA^T - A^T PA + diag(c)
             grad = -2 * A @ P @ A + np.diag(c)
 
             # Step 2: Solve linear subproblem
-            # min_{Q ∈ D_n} tr(grad^T Q)
+            # min_{Q in D_n} tr(grad^T Q)
             # This is equivalent to a linear assignment problem
             _, col_ind = linear_sum_assignment(grad)
             Q = np.eye(n)[col_ind]
@@ -163,7 +163,7 @@ class QSA:
             R = Q - P
 
             # Compute coefficients for quadratic a * alpha^2 + b * alpha + constant
-            # where g(alpha) = f(P + αR) = a * alpha^2 + b * alpha^2 + constant
+            # where g(alpha) = f(P + alpha*R) = a * alpha^2 + b * alpha^2 + constant
             a = -np.trace(A @ R @ A @ R.T)
             b = (
                 -np.trace(A @ P @ A @ R.T)
