@@ -20,6 +20,7 @@ References:
       of doubly stochastic matrices: A second-order geometry."
     - The `manopt` (MATLAB) toolbox: https://github.com/NicolasBoumal/manopt
 """
+
 from typing import Optional
 
 import logging
@@ -207,7 +208,6 @@ class DoublyStochastic(Manifold):
         Y = point + alpha * tangent_vector
         return Y
 
-
     def _retraction_sinkhorn(self, point, tangent_vector, max_exp_arg=50.0):
         """Exponential-based retraction with Sinkhorn projection."""
         # Clip to prevent overflow
@@ -251,7 +251,7 @@ class DoublyStochastic(Manifold):
         n = self._n
 
         # Unpack the right-hand side vector b
-        Z1 = b[:n]   # Corresponds to Z1 in the paper
+        Z1 = b[:n]  # Corresponds to Z1 in the paper
         ZT1 = b[n:]  # Corresponds to Z^T 1 in the paper
 
         # The system for α is: (I - XX^T)α = Z1 - X(Z^T 1)
@@ -290,7 +290,9 @@ class DoublyStochastic(Manifold):
 
         if info != 0:
             # Handle case where the cg solver did not converge
-            logging.debug(f"Warning: Conjugate Gradient solver did not converge. Info: {info}")
+            logging.debug(
+                f"Warning: Conjugate Gradient solver did not converge. Info: {info}"
+            )
             logging.debug(f"Using pseudoinverse to solve the linear system.")
             return self._linear_solve_pinv(point, b)
 
@@ -321,7 +323,7 @@ class DoublyStochastic(Manifold):
             shape=(n, n),
             matvec=matvec,
             rmatvec=matvec,  # rmatvec is for A.T @ v
-            dtype=point.dtype
+            dtype=point.dtype,
         )
 
         # The right-hand side of the system A @ alpha = b_alpha
@@ -331,9 +333,7 @@ class DoublyStochastic(Manifold):
         # We can set a tolerance and iteration limit for performance tuning.
         # iter_lim is a reasonable default to prevent infinite loops.
         # atol and btol are standard stopping criteria.
-        lsqr_result = lsqr(
-            A_op, b_alpha, iter_lim=2 * n, atol=1e-8, btol=1e-8
-        )
+        lsqr_result = lsqr(A_op, b_alpha, iter_lim=2 * n, atol=1e-8, btol=1e-8)
         alpha = lsqr_result[0]
         istop = lsqr_result[1]
         itn = lsqr_result[2]
@@ -349,7 +349,6 @@ class DoublyStochastic(Manifold):
 
         return alpha, beta
 
-
     def _linear_solve(self, point, b):
         return self._linear_solve_pinv(point, b)
 
@@ -364,7 +363,9 @@ class DoublyStochastic(Manifold):
 
         print("exp", tangent_vector)
         if np.isnan(np.sum(tangent_vector)):
-            import pdb; pdb.set_trace()
+            import pdb
+
+            pdb.set_trace()
 
         return self.retraction(point, tangent_vector)
 

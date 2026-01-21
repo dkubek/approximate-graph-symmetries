@@ -23,7 +23,14 @@ from scipy.optimize import linear_sum_assignment
 from tqdm import tqdm
 
 # Import optimization methods
-from AGS.methods import OrthogonalRelaxation, QSA, InteriorPoint, Manifold, DimensionalityReduction
+from AGS.methods import (
+    OrthogonalRelaxation,
+    QSA,
+    InteriorPoint,
+    Manifold,
+    DimensionalityReduction,
+    NaivePairwiseSwap,
+)
 
 # Suppress warnings
 warnings.filterwarnings("ignore")
@@ -98,6 +105,13 @@ class DimensionalityReductionConfig(BaseConfig):
 
 
 @dataclass
+class NaivePairwiseSwapConfig:
+    """Configuration for NaivePairwiseSwap method."""
+
+    verbose: int = 0
+
+
+@dataclass
 class Config:
     """Main configuration container."""
 
@@ -108,9 +122,16 @@ class Config:
     # Method configurations
     InteriorPoint: InteriorPointConfig = field(default_factory=InteriorPointConfig)
     Manifold: ManifoldConfig = field(default_factory=ManifoldConfig)
-    OrthogonalRelaxation: OrthogonalRelaxationConfig = field(default_factory=OrthogonalRelaxationConfig)
+    OrthogonalRelaxation: OrthogonalRelaxationConfig = field(
+        default_factory=OrthogonalRelaxationConfig
+    )
     QSA: QSAConfig = field(default_factory=QSAConfig)
-    DimensionalityReduction: DimensionalityReductionConfig = field(default_factory=DimensionalityReductionConfig)
+    DimensionalityReduction: DimensionalityReductionConfig = field(
+        default_factory=DimensionalityReductionConfig
+    )
+    NaivePairwiseSwap: NaivePairwiseSwapConfig = field(
+        default_factory=NaivePairwiseSwapConfig
+    )
 
 
 # ============================================================================
@@ -138,9 +159,9 @@ def format_value_for_dirname(value: Any) -> str:
                 base, exp = exp_str.split("e" if "e" in exp_str else "E")
                 base = base.rstrip("0").rstrip(".")
                 exp_str = (
-                        base
-                        + ("em" if "em" in exp_str else "ep")
-                        + exp.split("m" if "m" in exp else "p")[1]
+                    base
+                    + ("em" if "em" in exp_str else "ep")
+                    + exp.split("m" if "m" in exp else "p")[1]
                 )
             return exp_str
         else:
@@ -156,7 +177,7 @@ def format_value_for_dirname(value: Any) -> str:
 
 
 def get_important_params(
-        method_name: str, method_config: Any, c: float
+    method_name: str, method_config: Any, c: float
 ) -> Dict[str, Any]:
     """
     Get important parameters for a given method.
@@ -235,7 +256,7 @@ def get_param_dirname(method_name: str, method_config: Any, config: Config) -> s
 
 
 def save_config_json(
-        base_path: Path, method_name: str, method_config: Any, config: Config
+    base_path: Path, method_name: str, method_config: Any, config: Config
 ) -> None:
     """
     Save complete configuration to JSON file.
@@ -271,6 +292,8 @@ def create_method_instance(method_name: str, config: Config) -> Any:
         return QSA(**asdict(method_config))
     elif method_name == "DimensionalityReduction":
         return DimensionalityReduction(**asdict(method_config))
+    elif method_name == "NaivePairwiseSwap":
+        return NaivePairwiseSwap(**asdict(method_config))
     else:
         raise ValueError(f"Unknown method: {method_name}")
 
@@ -279,7 +302,7 @@ def create_method_instance(method_name: str, config: Config) -> Any:
 # Processing Functions
 # ============================================================================
 def process_single_run(
-        A: np.ndarray, method: Any, c: float
+    A: np.ndarray, method: Any, c: float
 ) -> Tuple[np.ndarray, np.ndarray, Dict[str, Any]]:
     """
     Process a single optimization run.
@@ -306,7 +329,7 @@ def process_single_run(
 
 
 def process_simulation(
-        args: Tuple[str, str, Path, int, Config, Path, bool],
+    args: Tuple[str, str, Path, int, Config, Path, bool],
 ) -> Optional[Dict[str, Any]]:
     """
     Process a single simulation.
@@ -344,10 +367,18 @@ def process_simulation(
 
         # Load data
         # data = np.load(instance_file)
-        with open(instance_file, 'rb') as fin:
+        with open(instance_file, "rb") as fin:
             data = pickle.load(fin)
 
-        # Get adjacency matrix
+        # Get adjacency matrix with validation
+        if sim_idx not in data:
+            available_sims = sorted(data.keys())
+            raise ValueError(
+                f"Simulation index {sim_idx} not found in {instance_file.name}. "
+                f"Available indices: {min(available_sims)}-{max(available_sims)} "
+                f"(total: {len(available_sims)})"
+            )
+        
         A = data[sim_idx].astype(np.float64)
 
         # Create method instance
@@ -446,9 +477,10 @@ def save_single_result(result_data: Dict[str, Any], result_base: Path) -> None:
 # Main Orchestration
 # ============================================================================
 def collect_work_items(
-        data_path: Path,
-        instance_filter: Optional[List[str]] = None,
-        simulation_filter: Optional[List[int]] = None,
+    data_path: Path,
+    instance_filter: Optional[List[str]] = None,
+    simulation_filter: Optional[List[int]] = None,
+    graph_type_filter: Optional[List[str]] = None,
 ) -> List[Tuple[str, Path, int]]:
     """
     Collect all work items (instance, simulation pairs) from data directory.
@@ -457,33 +489,48 @@ def collect_work_items(
         data_path: Path to data directory
         instance_filter: List of instance base names to process (None = all)
         simulation_filter: List of simulation indices to process (None = all)
+        graph_type_filter: List of graph types to process (None = all)
 
     Returns:
         List of (graph_type, instance_file, sim_idx) tuples
     """
     work_items = []
-    all_simulations = list(range(39))  # 0 to 38
-
-    # Determine which simulations to process
-    simulations_to_process = simulation_filter if simulation_filter else all_simulations
 
     for graph_type in os.listdir(data_path):
         graph_dir = data_path / graph_type
         if not graph_dir.is_dir():
             continue
 
+        # Check graph type filter
+        if graph_type_filter and graph_type not in graph_type_filter:
+            continue
+
         for filename in os.listdir(graph_dir):
             filepath = graph_dir / filename
             if (
-                    filepath.is_file()
-                    and filepath.suffix == ".p"
-                    and "allInfo" not in filename
+                filepath.is_file()
+                and filepath.suffix == ".p"
+                and "allInfo" not in filename
             ):
                 instance_base = filepath.stem
 
                 # Check instance filter
                 if instance_filter and instance_base not in instance_filter:
                     continue
+
+                # Determine which simulations to process for this instance
+                if simulation_filter:
+                    # Use user-specified simulation indices
+                    simulations_to_process = simulation_filter
+                else:
+                    # Auto-detect available simulations from pickle file
+                    try:
+                        with open(filepath, "rb") as f:
+                            data = pickle.load(f)
+                        simulations_to_process = sorted(data.keys())
+                    except Exception:
+                        # Fallback to default range if pickle can't be read
+                        simulations_to_process = list(range(39))
 
                 # Add work items for each simulation
                 for sim_idx in simulations_to_process:
@@ -493,19 +540,22 @@ def collect_work_items(
 
 
 def run_optimization(
-        methods: List[str],
-        data_path: Path,
-        results_path: Path,
-        config: Config,
-        instance_filter: Optional[List[str]] = None,
-        simulation_filter: Optional[List[int]] = None,
-        force_recompute: bool = False,
-        dry_run: bool = False,
+    methods: List[str],
+    data_path: Path,
+    results_path: Path,
+    config: Config,
+    instance_filter: Optional[List[str]] = None,
+    simulation_filter: Optional[List[int]] = None,
+    graph_type_filter: Optional[List[str]] = None,
+    force_recompute: bool = False,
+    dry_run: bool = False,
 ) -> None:
     """Run optimization for specified methods."""
 
     # Collect all work items
-    work_items = collect_work_items(data_path, instance_filter, simulation_filter)
+    work_items = collect_work_items(
+        data_path, instance_filter, simulation_filter, graph_type_filter
+    )
 
     if not work_items:
         print("No work items found!")
@@ -616,7 +666,13 @@ def load_config(config_file: Optional[Path]) -> Config:
                 setattr(config, key, config_dict[key])
 
         # Load method configs
-        for method_name in ["InteriorPoint", "Manifold", "OrthogonalRelaxation", "QSA", "DimensionalityReduction"]:
+        for method_name in [
+            "InteriorPoint",
+            "Manifold",
+            "OrthogonalRelaxation",
+            "QSA",
+            "DimensionalityReduction",
+        ]:
             if method_name in config_dict:
                 method_config_class = globals()[f"{method_name}Config"]
                 method_config = method_config_class(**config_dict[method_name])
@@ -645,8 +701,10 @@ def parse_simulation_indices(sim_str: str) -> List[int]:
         else:
             simulations.append(int(part))
 
-    # Filter valid simulation indices (0-38)
-    return [s for s in simulations if 0 <= s <= 38]
+    # Return all requested indices - validation happens when loading pickle files
+    # This allows different graph types to have different simulation counts
+    # (e.g., BRAIN has 88, others have 39)
+    return sorted(set(simulations))
 
 
 def main():
@@ -670,7 +728,13 @@ def main():
     )
 
     # Method selection
-    all_methods = ["InteriorPoint", "Manifold", "OrthogonalRelaxation", "QSA", "DimensionalityReduction"]
+    all_methods = [
+        "InteriorPoint",
+        "Manifold",
+        "OrthogonalRelaxation",
+        "QSA",
+        "DimensionalityReduction",
+    ]
     parser.add_argument(
         "--methods",
         nargs="+",
@@ -689,6 +753,11 @@ def main():
         "--simulations",
         type=str,
         help="Simulation indices to process (e.g., '0,1,2' or '0-5' or '0-5,10,15-20')",
+    )
+    parser.add_argument(
+        "--graph-types",
+        nargs="+",
+        help="Graph types to process (e.g., BA ER HK). If not specified, all types are processed.",
     )
 
     # Configuration
@@ -758,6 +827,12 @@ def main():
         simulation_filter = parse_simulation_indices(args.simulations)
         print(f"Processing simulations: {sorted(simulation_filter)}")
 
+    # Parse graph types
+    graph_type_filter = None
+    if args.graph_types:
+        graph_type_filter = args.graph_types
+        print(f"Processing graph types: {graph_type_filter}")
+
     # Print configuration
     print("\nConfiguration:")
     print(f"  Penalty parameter (c): {config.c}")
@@ -772,6 +847,7 @@ def main():
         config,
         instance_filter=args.instances,
         simulation_filter=simulation_filter,
+        graph_type_filter=graph_type_filter,
         force_recompute=args.force_recompute,
         dry_run=args.dry_run,
     )

@@ -22,6 +22,7 @@ References:
     - Douik, A., & Hassibi, B. (2019). "Manifold optimization over the set of
       doubly stochastic matrices: A second-order geometry."
 """
+
 import time
 from typing import Optional
 
@@ -29,8 +30,7 @@ import numpy as np
 import pymanopt
 import torch
 from pymanopt import Problem
-from pymanopt.optimizers import (ConjugateGradient, SteepestDescent,
-                                 TrustRegions)
+from pymanopt.optimizers import ConjugateGradient, SteepestDescent, TrustRegions
 
 from AGS.methods.manifold.doublystochastic import DoublyStochastic
 
@@ -44,6 +44,7 @@ class Manifold:
     Doubly Stochastic manifold, then runs a chosen Riemannian optimizer to
     find the optimal doubly stochastic matrix.
     """
+
     def __init__(
         self,
         optimizer="steepest_descent",
@@ -126,7 +127,7 @@ class Manifold:
             AP = A @ P
             APAT = AP @ A.t()
             term1 = -torch.sum(APAT * P)
-            #term1 = torch.mean(torch.pow(P @ A @ P.t() - A, 2))
+            # term1 = torch.mean(torch.pow(P @ A @ P.t() - A, 2))
             term2 = torch.sum(c * torch.diag(P))
 
             total_cost = term1 + term2
@@ -168,8 +169,5 @@ class Manifold:
 
         return {
             "P": P_opt,
-            "metrics": {
-                "time": end_time - start_time,
-                "iterations": result.iterations
-            }
+            "metrics": {"time": end_time - start_time, "iterations": result.iterations},
         }

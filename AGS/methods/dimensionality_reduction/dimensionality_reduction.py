@@ -20,6 +20,7 @@ Reference:
     Prillo, S., & Eisenschlos, J. (2020). "Softsort: A continuous relaxation
     for the argsort operator". International Conference on Machine Learning.
 """
+
 from time import time
 
 import numpy as np
@@ -76,6 +77,7 @@ class DimensionalityReduction:
     is performed using AdamW, and an annealing schedule on the temperature `tau`
     guides the solution towards a discrete permutation.
     """
+
     def __init__(
         self,
         max_iter=2000,

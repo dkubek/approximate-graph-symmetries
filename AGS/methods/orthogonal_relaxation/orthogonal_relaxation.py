@@ -21,6 +21,7 @@ Reference:
     Orthogonal Group Path for Permutation Relaxation". Advances in Neural
     Information Processing Systems.
 """
+
 from time import time
 
 import numpy as np
@@ -43,17 +44,18 @@ class OrthogonalRelaxation:
     refines a solution while an annealing schedule guides the relaxation towards
     a discrete permutation matrix.
     """
+
     def __init__(
-            self,
-            max_iter=3000,
-            initial_tau=0.7,
-            final_tau=0.5,
-            loss="indefinite",
-            annealing_scheme="exponential",
-            decay_steps=5000,
-            learning_rate=1e-1,
-            min_rel_improvement=1e-4,
-            verbose=1,
+        self,
+        max_iter=3000,
+        initial_tau=0.7,
+        final_tau=0.5,
+        loss="indefinite",
+        annealing_scheme="exponential",
+        decay_steps=5000,
+        learning_rate=1e-1,
+        min_rel_improvement=1e-4,
+        verbose=1,
     ):
         """
         Initializes the OrthogonalRelaxation solver.
@@ -114,7 +116,7 @@ class OrthogonalRelaxation:
 
     def _loss_norm(self, A, P, c):
         quadratic_term = (
-                1 / 2 * torch.sum(torch.pow(P @ A @ P.transpose(-2, -1) - A, 2))
+            1 / 2 * torch.sum(torch.pow(P @ A @ P.transpose(-2, -1) - A, 2))
         )
 
         diag_elements = torch.diagonal(P, dim1=-2, dim2=-1)
@@ -126,9 +128,9 @@ class OrthogonalRelaxation:
         return quadratic_term + penalty
 
     def solve(
-            self,
-            A,
-            c=0.2,
+        self,
+        A,
+        c=0.2,
     ):
         """
         Executes the optimization to find an approximate symmetry.

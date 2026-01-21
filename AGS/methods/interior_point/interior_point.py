@@ -21,6 +21,7 @@ Reference:
     interior-point filter line-search algorithm for large-scale nonlinear
     programming." Mathematical programming.
 """
+
 import time
 
 import cyipopt
@@ -45,6 +46,7 @@ class InteriorPoint:
     uses the `cyipopt` library to find a solution. The method operates on a
     vectorized representation of the permutation matrix P.
     """
+
     def __init__(
         self,
         max_iter=1000,
@@ -181,8 +183,18 @@ class InteriorPoint:
         return (self.hess_rows, self.hess_cols)
 
     def intermediate(
-        self, alg_mod, iter_count, obj_value, inf_pr, inf_du, mu,
-        d_norm, regularization_size, alpha_du, alpha_pr, ls_trials
+        self,
+        alg_mod,
+        iter_count,
+        obj_value,
+        inf_pr,
+        inf_du,
+        mu,
+        d_norm,
+        regularization_size,
+        alpha_du,
+        alpha_pr,
+        ls_trials,
     ):
         """IPOPT callback to track iterations."""
         self._iteration_count = iter_count
@@ -288,7 +300,7 @@ class InteriorPoint:
         # Optimize for interior point method
         nlp.add_option("mu_strategy", "adaptive")
         nlp.add_option("mehrotra_algorithm", "yes")
-        #nlp.add_option("linear_solver", "ma86")
+        # nlp.add_option("linear_solver", "ma86")
         nlp.add_option("linear_solver", "mumps")
 
         # Solve
@@ -303,6 +315,6 @@ class InteriorPoint:
             "P": P_opt,
             "metrics": {
                 "time": end_time - start_time,
-                "iterations": self._iteration_count
-            }
+                "iterations": self._iteration_count,
+            },
         }
