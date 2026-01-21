@@ -1,0 +1,965 @@
+---
+title: "Generate New Graph Types: Geometric, Duplication-Divergence, and Holme-Kim"
+author: "David Kubek"
+date: today
+format:
+  html:
+    toc: true
+    toc-depth: 3
+    code-fold: false
+    code-summary: "Show code"
+    code-line-numbers: true
+    code-annotations: hover
+execute:
+  warning: false
+  message: false
+  eval: false
+---
+
+# Introduction
+
+This notebook generates four additional graph types to extend the existing dataset:
+
+1. **Random Geometric Graphs (RGG 2D)**: Nodes embedded in 2D Euclidean space, connected by proximity
+2. **Random Geometric Graphs (RGG 3D)**: Nodes embedded in 3D Euclidean space, connected by proximity
+3. **Duplication-Divergence (DD)**: A biological network model simulating gene/protein duplication
+4. **Holme-Kim (HK)**: Scale-free networks with tunable clustering (extension of Barabási-Albert)
+
+These graphs complement the existing BA (Barabási-Albert), ER (Erdős-Rényi), and LRM (Local Random Model) graphs in the dataset, providing diverse topological structures for testing approximate symmetry algorithms.
+
+## Why These Graph Types?
+
+### Random Geometric Graphs (RGG)
+
+**Generating Process**: Nodes are placed uniformly at random in a unit hypercube of dimension $d$. Two nodes $u$ and $v$ are connected if their Euclidean distance $\|u - v\|$ is less than or equal to a radius $r$.
+
+**Main Idea**: RGGs model spatial networks where connectivity is constrained by physical proximity. They are used to model wireless sensor networks, neural networks, and social networks with geographical constraints.
+
+**Topological Properties**:
+- Natural clustering due to spatial embedding
+- Degree distribution depends on radius and dimension
+- Exhibits threshold behavior: above a critical radius, the graph becomes connected
+- Low diameter when connected
+
+**Dimension Effects**: 
+- **2D RGG**: Models planar networks (e.g., wireless sensor networks, geographic social networks)
+- **3D RGG**: Models volumetric networks (e.g., neural networks, molecular structures, 3D sensor networks)
+- Higher dimensions require smaller radii to achieve the same density due to increased volume
+- The volume of a $d$-dimensional hypersphere scales as $V_d(r) = \frac{\pi^{d/2}}{\Gamma(d/2 + 1)} r^d$
+
+**Visual Characteristics**: RGGs typically show clear spatial clustering patterns, with dense local neighborhoods and sparse long-range connections. 3D embeddings exhibit more dispersed structures than 2D for the same density.
+
+### Duplication-Divergence Graphs (DD)
+
+**Generating Process**: Starting with two connected nodes, the model iteratively:
+1. Selects a random node $u$ to duplicate
+2. Creates a new node $v$ (the duplicate)
+3. For each neighbor $w$ of $u$, connects $v$ to $w$ with probability $p$
+4. If $v$ has no edges, it is removed and the process repeats
+
+**Main Idea**: This model simulates biological processes in protein-protein interaction networks and gene regulatory networks, where gene duplication is followed by divergence (loss of some interactions).
+
+**Topological Properties**:
+- Power-law-like degree distribution
+- High clustering coefficient
+- Small-world properties
+- Disassortativity (hubs tend to connect to low-degree nodes)
+
+**Visual Characteristics**: DD graphs exhibit hub-and-spoke patterns with hierarchical structure, reflecting the evolutionary process of duplication and divergence.
+
+### Holme-Kim Graphs (HK)
+
+**Generating Process**: Extension of the Barabási-Albert model with an additional triadic closure step:
+1. Start with $m$ connected nodes
+2. For each new node:
+   - Add $m$ edges via preferential attachment
+   - After each edge $(v, u)$, with probability $p$, add an edge to a random neighbor of $u$ (forming a triangle)
+
+**Main Idea**: Combines scale-free degree distribution (preferential attachment) with high clustering (triadic closure), addressing a limitation of pure BA graphs which have low clustering.
+
+**Topological Properties**:
+- Power-law degree distribution (scale-free)
+- Tunable average clustering coefficient (controlled by $p$)
+- Small-world properties
+- Hub structure with varying levels of transitivity
+
+**Visual Characteristics**: HK graphs show clear hub nodes with many connections, but unlike pure BA graphs, they exhibit significant clustering around hubs, creating more realistic social network structures.
+
+# Setup and Configuration
+
+```{python}
+#| label: imports
+#| code-summary: "Import required libraries"
+
+import pickle
+from pathlib import Path
+from typing import Dict, List, Tuple, Any
+
+import networkx as nx
+import numpy as np
+import pandas as pd
+from tqdm import tqdm
+```
+
+```{python}
+#| label: constants
+#| code-summary: "Global configuration constants"
+
+# Directory configuration
+DATA_DIR = Path("../data/kubek")
+OUTPUT_DIRS = {
+    "GEO": DATA_DIR / "GEO",
+    "GEO3D": DATA_DIR / "GEO3D",
+    "DD": DATA_DIR / "DD", 
+    "HK": DATA_DIR / "HK",
+}
+
+# Instance generation parameters
+N_SIMULATIONS = 39  # Number of simulation instances per configuration
+NODE_COUNTS = [20, 50, 100]  # Number of nodes in each graph
+DENSITY_LEVELS = [15, 40]  # Density levels (interpretation varies by graph type)
+
+# Random seed configuration for reproducibility
+BASE_SEED = 42
+```
+
+## Graph-Specific Parameters
+
+The parameters below are computed from first principles to achieve target edge densities.
+
+### Mathematical Foundations
+
+For a graph with $n$ nodes, the maximum number of edges in an undirected graph is:
+$$E_{\text{max}} = \binom{n}{2} = \frac{n(n-1)}{2}$$
+
+Edge density is defined as:
+$$\rho = \frac{|E|}{E_{\text{max}}} = \frac{2|E|}{n(n-1)}$$
+
+We target $\rho \approx 0.15$ (15%) and $\rho \approx 0.40$ (40%).
+
+# Parameter Calibration
+
+Iterative refinement to achieve target densities.
+
+```{python}
+#| label: rgg-dimension
+#| code-summary: "RGG embedding dimension"
+
+import math
+
+RGG_DIMENSION = 2
+RGG_DIMENSION_3D = 3
+```
+
+```{python}
+#| label: measure-density
+#| code-summary: "Measure average density from graphs"
+
+def measure_density(graphs: Dict[int, np.ndarray]) -> float:
+    """Measure average density from generated graphs."""
+    densities = []
+    for adj in graphs.values():
+        G = nx.from_numpy_array(adj)
+        n = G.number_of_nodes()
+        m = G.number_of_edges()
+        density = 100 * 2 * m / (n * (n - 1)) if n > 1 else 0
+        densities.append(density)
+    return np.mean(densities)
+```
+
+```{python}
+#| label: calibrate-rgg
+#| code-summary: "Iteratively calibrate RGG radius"
+
+def calibrate_rgg_radius(
+    n_nodes: int,
+    target_density: float,
+    dimension: int = 2,
+    n_samples: int = 10,
+    max_iterations: int = 5,
+    tolerance: float = 1.0
+) -> float:
+    """Calibrate RGG radius through iterative refinement."""
+    from math import gamma
+    
+    # Initial guess from geometric formula
+    density_frac = target_density / 100.0
+    gamma_term = gamma(dimension / 2 + 1)
+    pi_term = math.pi ** (dimension / 2)
+    radius = (density_frac * gamma_term / pi_term) ** (1 / dimension)
+    
+    for iteration in range(max_iterations):
+        # Generate test graphs
+        graphs = {}
+        for i in range(n_samples):
+            seed = 99999 + iteration * n_samples + i
+            G = nx.random_geometric_graph(n_nodes, radius, dim=dimension, seed=seed)
+            graphs[i] = nx.to_numpy_array(G, dtype=float)
+        
+        # Measure and adjust
+        actual = measure_density(graphs)
+        if abs(actual - target_density) < tolerance:
+            break
+        
+        adjustment = (target_density / actual) ** (1 / dimension)
+        radius *= adjustment
+    
+    return radius
+```
+
+```{python}
+#| label: calibrate-hk
+#| code-summary: "Iteratively calibrate HK parameter m"
+
+def calibrate_hk_m(
+    n_nodes: int,
+    target_density: float,
+    p: float = 0.5,
+    n_samples: int = 10,
+    max_iterations: int = 5,
+    tolerance: float = 1.0
+) -> int:
+    """Calibrate HK parameter m through iterative refinement."""
+    # Initial guess from BA formula
+    density_frac = target_density / 100.0
+    discriminant = n_nodes**2 - 2 * density_frac * n_nodes * (n_nodes - 1)
+    
+    if discriminant < 0:
+        m = int(density_frac * n_nodes / 2)
+    else:
+        m = int((n_nodes - math.sqrt(discriminant)) / 2)
+    m = max(1, min(n_nodes - 1, m))
+    
+    for iteration in range(max_iterations):
+        # Generate test graphs
+        graphs = {}
+        for i in range(n_samples):
+            seed = 99999 + iteration * n_samples + i
+            G = nx.powerlaw_cluster_graph(n_nodes, m, p, seed=seed)
+            graphs[i] = nx.to_numpy_array(G, dtype=float)
+        
+        # Measure and adjust
+        actual = measure_density(graphs)
+        if abs(actual - target_density) < tolerance:
+            break
+        
+        adjustment = int(round(m * (target_density / actual - 1)))
+        m = max(1, min(n_nodes - 1, m + adjustment))
+    
+    return m
+```
+
+```{python}
+#| label: calibrate-rgg-params
+#| code-summary: "Calibrate all RGG parameters"
+
+print("Calibrating RGG radius (2D)...")
+RGG_PARAMS = {}
+for n_nodes in NODE_COUNTS:
+    RGG_PARAMS[n_nodes] = {}
+    for density in DENSITY_LEVELS:
+        radius = calibrate_rgg_radius(n_nodes, density, RGG_DIMENSION, max_iterations=20)
+        RGG_PARAMS[n_nodes][density] = radius
+        print(f"  n={n_nodes}, density={density}%: radius={radius:.4f}")
+```
+
+```{python}
+#| label: calibrate-rgg-3d-params
+#| code-summary: "Calibrate all 3D RGG parameters"
+
+print("\nCalibrating RGG radius (3D)...")
+RGG_3D_PARAMS = {}
+for n_nodes in NODE_COUNTS:
+    RGG_3D_PARAMS[n_nodes] = {}
+    for density in DENSITY_LEVELS:
+        radius = calibrate_rgg_radius(n_nodes, density, RGG_DIMENSION_3D, max_iterations=20)
+        RGG_3D_PARAMS[n_nodes][density] = radius
+        print(f"  n={n_nodes}, density={density}%: radius={radius:.4f}")
+```
+
+```{python}
+#| label: dd-params
+#| code-summary: "DD parameters from research paper"
+
+DD_PARAMS = {
+    20: {15: 0.1, 40: 0.3},
+    50: {15: 0.1, 40: 0.3},
+    100: {15: 0.1, 40: 0.3},
+}
+```
+
+```{python}
+#| label: calibrate-hk-params
+#| code-summary: "Calibrate all HK parameters"
+
+print("Calibrating HK parameter m...")
+HK_TRIADIC_CLOSURE_PROB = 0.5
+HK_PARAMS = {}
+
+for n_nodes in NODE_COUNTS:
+    HK_PARAMS[n_nodes] = {}
+    for density in DENSITY_LEVELS:
+        m = calibrate_hk_m(n_nodes, density, HK_TRIADIC_CLOSURE_PROB, max_iterations=20)
+        HK_PARAMS[n_nodes][density] = {"m": m, "p": HK_TRIADIC_CLOSURE_PROB}
+        print(f"  n={n_nodes}, density={density}%: m={m}")
+```
+
+# Helper Functions
+
+```{python}
+#| label: compute-density
+#| code-summary: "Compute edge density from NetworkX graph"
+
+def compute_edge_density(G: nx.Graph) -> float:
+    """Compute edge density as percentage."""
+    n = G.number_of_nodes()
+    m = G.number_of_edges()
+    if n <= 1:
+        return 0.0
+    return 100 * 2 * m / (n * (n - 1))
+```
+
+```{python}
+#| label: create-directories
+#| code-summary: "Create output directories"
+
+def create_output_directories(output_dirs: Dict[str, Path]) -> None:
+    """Create directories for generated graphs."""
+    for graph_type, directory in output_dirs.items():
+        directory.mkdir(parents=True, exist_ok=True)
+        print(f"Created/verified directory: {directory}")
+```
+
+```{python}
+#| label: generate-filename
+#| code-summary: "Generate filename per convention"
+
+def generate_filename(graph_type: str, n_nodes: int, density: int, **kwargs) -> str:
+    """Generate filename: {TYPE}_nNodes{N}_density{D}_{param1}{val1}_{param2}{val2}.p"""
+    base_name = f"{graph_type}_nNodes{n_nodes}_density{density}"
+    for param_name, param_value in sorted(kwargs.items()):
+        if param_value is not None:
+            # Format floats to 3 decimal places
+            if isinstance(param_value, float):
+                base_name += f"_{param_name}{param_value:.3f}"
+            else:
+                base_name += f"_{param_name}{param_value}"
+    return f"{base_name}.p"
+```
+
+```{python}
+#| label: save-instances
+#| code-summary: "Save instances to pickle file"
+
+def save_graph_instances(graphs: Dict[int, np.ndarray], filepath: Path) -> None:
+    """Save dictionary of adjacency matrices to pickle."""
+    with open(filepath, 'wb') as f:
+        pickle.dump(graphs, f, protocol=pickle.HIGHEST_PROTOCOL)
+    print(f"  Saved {len(graphs)} instances to {filepath.name}")
+```
+
+# Graph Generators
+
+```{python}
+#| label: gen-rgg
+#| code-summary: "Generate RGG instances"
+
+def generate_rgg_instances(
+    n_nodes: int, radius: float, n_simulations: int,
+    dimension: int = 2, seed_base: int = BASE_SEED
+) -> Dict[int, np.ndarray]:
+    """Generate multiple RGG instances."""
+    instances = {}
+    for sim_id in range(1, n_simulations + 1):
+        seed = seed_base + sim_id
+        G = nx.random_geometric_graph(n_nodes, radius, dim=dimension, seed=seed)
+        instances[sim_id] = nx.to_numpy_array(G, dtype=float)
+    return instances
+```
+
+```{python}
+#| label: gen-rgg-3d
+#| code-summary: "Generate 3D RGG instances"
+
+def generate_rgg_3d_instances(
+    n_nodes: int, radius: float, n_simulations: int,
+    seed_base: int = BASE_SEED
+) -> Dict[int, np.ndarray]:
+    """Generate multiple 3D RGG instances."""
+    instances = {}
+    for sim_id in range(1, n_simulations + 1):
+        seed = seed_base + sim_id
+        G = nx.random_geometric_graph(n_nodes, radius, dim=3, seed=seed)
+        instances[sim_id] = nx.to_numpy_array(G, dtype=float)
+    return instances
+```
+
+```{python}
+#| label: gen-dd
+#| code-summary: "Generate DD instances"
+
+def generate_dd_instances(
+    n_nodes: int, retention_prob: float, n_simulations: int,
+    seed_base: int = BASE_SEED, max_attempts: int = 100
+) -> Dict[int, np.ndarray]:
+    """
+    Generate multiple Duplication-Divergence Graph instances.
+    
+    Note: The DD model can fail to produce graphs with exactly n_nodes
+    if edges are not retained. This function retries up to max_attempts.
+    
+    Parameters
+    ----------
+    n_nodes : int
+        Number of nodes
+    retention_prob : float
+        Probability of retaining edges after duplication
+    n_simulations : int
+        Number of instances to generate
+    seed_base : int, default=BASE_SEED
+        Base seed for reproducibility
+    max_attempts : int, default=100
+        Maximum attempts per instance if generation fails
+        
+    Returns
+    -------
+    Dict[int, np.ndarray]
+        Dictionary mapping simulation IDs (1-indexed) to adjacency matrices
+    """
+    instances = {}
+    for sim_id in range(1, n_simulations + 1):
+        seed = seed_base + sim_id
+        
+        for attempt in range(max_attempts):
+            try:
+                G = nx.duplication_divergence_graph(n_nodes, retention_prob, seed=seed + attempt)
+                if G.number_of_nodes() == n_nodes:
+                    break
+            except nx.NetworkXError:
+                continue
+        else:
+            raise RuntimeError(f"Failed DD generation: n={n_nodes}, p={retention_prob}")
+        
+        instances[sim_id] = nx.to_numpy_array(G, dtype=float)
+    return instances
+```
+
+```{python}
+#| label: gen-hk
+#| code-summary: "Generate HK instances"
+
+def generate_hk_instances(
+    n_nodes: int, m: int, p: float, n_simulations: int,
+    seed_base: int = BASE_SEED
+) -> Dict[int, np.ndarray]:
+    """Generate multiple HK (powerlaw cluster) instances."""
+    instances = {}
+    for sim_id in range(1, n_simulations + 1):
+        seed = seed_base + sim_id
+        G = nx.powerlaw_cluster_graph(n_nodes, m, p, seed=seed)
+        instances[sim_id] = nx.to_numpy_array(G, dtype=float)
+    return instances
+```
+
+# Generation Pipeline
+
+```{python}
+#| label: init-pipeline
+#| code-summary: "Initialize directories"
+
+print("GRAPH GENERATION PIPELINE")
+print("=" * 70)
+create_output_directories(OUTPUT_DIRS)
+```
+
+## Generate RGG
+
+```{python}
+#| label: gen-rgg-loop
+#| code-summary: "Generate all RGG instances"
+
+print("\nGenerating Random Geometric Graphs (RGG)")
+print("-" * 70)
+
+rgg_stats = []
+
+for n_nodes in NODE_COUNTS:
+    for density in DENSITY_LEVELS:
+        radius = RGG_PARAMS[n_nodes][density]
+        print(f"RGG: n={n_nodes}, density={density}%, radius={radius:.3f}")
+        
+        # Generate
+        instances = generate_rgg_instances(n_nodes, radius, N_SIMULATIONS, RGG_DIMENSION)
+        
+        # Measure
+        densities = [compute_edge_density(nx.from_numpy_array(adj)) for adj in instances.values()]
+        avg_density = np.mean(densities)
+        std_density = np.std(densities)
+        print(f"  Actual density: {avg_density:.2f}% +/- {std_density:.2f}%")
+        
+        # Save
+        filename = generate_filename("GEO", n_nodes, density, r=radius)
+        save_graph_instances(instances, OUTPUT_DIRS["GEO"] / filename)
+        
+        # Track
+        rgg_stats.append({
+            "n_nodes": n_nodes, "target_density": density, "radius": radius,
+            "actual_density_mean": avg_density, "actual_density_std": std_density
+        })
+
+print("RGG complete")
+```
+
+## Generate 3D RGG
+
+```{python}
+#| label: gen-rgg-3d-loop
+#| code-summary: "Generate all 3D RGG instances"
+
+print("\nGenerating 3D Random Geometric Graphs (GEO3D)")
+print("-" * 70)
+
+rgg_3d_stats = []
+
+for n_nodes in NODE_COUNTS:
+    for density in DENSITY_LEVELS:
+        radius = RGG_3D_PARAMS[n_nodes][density]
+        print(f"GEO3D: n={n_nodes}, density={density}%, radius={radius:.3f}")
+        
+        # Generate
+        instances = generate_rgg_3d_instances(n_nodes, radius, N_SIMULATIONS)
+        
+        # Measure
+        densities = [compute_edge_density(nx.from_numpy_array(adj)) for adj in instances.values()]
+        avg_density = np.mean(densities)
+        std_density = np.std(densities)
+        print(f"  Actual density: {avg_density:.2f}% +/- {std_density:.2f}%")
+        
+        # Save
+        filename = generate_filename("GEO3D", n_nodes, density, r=radius)
+        save_graph_instances(instances, OUTPUT_DIRS["GEO3D"] / filename)
+        
+        # Track
+        rgg_3d_stats.append({
+            "n_nodes": n_nodes, "target_density": density, "radius": radius,
+            "actual_density_mean": avg_density, "actual_density_std": std_density
+        })
+
+print("GEO3D complete")
+```
+
+## Generate DD
+
+```{python}
+#| label: gen-dd-loop
+#| code-summary: "Generate all DD instances"
+
+print("\nGenerating Duplication-Divergence Graphs (DD)")
+print("-" * 70)
+
+dd_stats = []
+
+for n_nodes in NODE_COUNTS:
+    for density in DENSITY_LEVELS:
+        retention_prob = DD_PARAMS[n_nodes][density]
+        print(f"DD: n={n_nodes}, density={density}%, p={retention_prob:.2f}")
+        
+        # Generate
+        instances = generate_dd_instances(n_nodes, retention_prob, N_SIMULATIONS)
+        
+        # Measure
+        densities = [compute_edge_density(nx.from_numpy_array(adj)) for adj in instances.values()]
+        avg_density = np.mean(densities)
+        std_density = np.std(densities)
+        print(f"  Actual density: {avg_density:.2f}% +/- {std_density:.2f}%")
+        
+        # Save
+        filename = generate_filename("DD", n_nodes, density, p=retention_prob)
+        save_graph_instances(instances, OUTPUT_DIRS["DD"] / filename)
+        
+        # Track
+        dd_stats.append({
+            "n_nodes": n_nodes, "target_density": density, "retention_prob": retention_prob,
+            "actual_density_mean": avg_density, "actual_density_std": std_density
+        })
+
+print("DD complete")
+```
+
+## Generate HK
+
+```{python}
+#| label: gen-hk-loop
+#| code-summary: "Generate all HK instances"
+
+print("\nGenerating Holme-Kim Graphs (HK)")
+print("-" * 70)
+
+hk_stats = []
+
+for n_nodes in NODE_COUNTS:
+    for density in DENSITY_LEVELS:
+        m = HK_PARAMS[n_nodes][density]["m"]
+        p = HK_PARAMS[n_nodes][density]["p"]
+        print(f"HK: n={n_nodes}, density={density}%, m={m}, p={p:.2f}")
+        
+        # Generate
+        instances = generate_hk_instances(n_nodes, m, p, N_SIMULATIONS)
+        
+        # Measure
+        densities = [compute_edge_density(nx.from_numpy_array(adj)) for adj in instances.values()]
+        avg_density = np.mean(densities)
+        std_density = np.std(densities)
+        print(f"  Actual density: {avg_density:.2f}% +/- {std_density:.2f}%")
+        
+        # Save
+        filename = generate_filename("HK", n_nodes, density, m=m, p=p)
+        save_graph_instances(instances, OUTPUT_DIRS["HK"] / filename)
+        
+        # Track
+        hk_stats.append({
+            "n_nodes": n_nodes, "target_density": density, "m": m, "p": p,
+            "actual_density_mean": avg_density, "actual_density_std": std_density
+        })
+
+print("HK complete")
+```
+
+# Summary
+
+```{python}
+#| label: print-summary
+#| code-summary: "Print generation summary"
+
+print("\n" + "=" * 70)
+print("GENERATION COMPLETE")
+print("=" * 70)
+print(f"\nGenerated {len(rgg_stats)} RGG (2D) configurations")
+print(f"Generated {len(rgg_3d_stats)} RGG (3D) configurations")
+print(f"Generated {len(dd_stats)} DD configurations")
+print(f"Generated {len(hk_stats)} HK configurations")
+```
+
+# Summary and Validation
+
+```{python}
+#| label: summary-statistics
+#| code-summary: "Display summary statistics for all generated graphs"
+
+import pandas as pd
+
+print("\n" + "=" * 70)
+print("GENERATION SUMMARY")
+print("=" * 70)
+
+# RGG Summary
+print("\nRandom Geometric Graphs (RGG 2D)")
+rgg_df = pd.DataFrame(rgg_stats)
+print(rgg_df.to_string(index=False))
+
+# RGG 3D Summary
+print("\nRandom Geometric Graphs (RGG 3D)")
+rgg_3d_df = pd.DataFrame(rgg_3d_stats)
+print(rgg_3d_df.to_string(index=False))
+
+# DD Summary
+print("\nDuplication-Divergence Graphs (DD)")
+dd_df = pd.DataFrame(dd_stats)
+print(dd_df.to_string(index=False))
+
+# HK Summary
+print("\nHolme-Kim Graphs (HK)")
+hk_df = pd.DataFrame(hk_stats)
+print(hk_df.to_string(index=False))
+
+total_files = len(rgg_stats) + len(rgg_3d_stats) + len(dd_stats) + len(hk_stats)
+total_instances = total_files * N_SIMULATIONS
+
+print(f"\nAll graphs generated successfully")
+print(f"Total files created: {total_files}")
+print(f"Total graph instances: {total_instances}")
+print("=" * 70)
+```
+
+# Verification
+
+```{python}
+#| label: verification
+#| code-summary: "Verify generated files can be loaded"
+
+print("\n" + "=" * 70)
+print("VERIFICATION")
+print("=" * 70)
+
+def verify_pickle_file(filepath: Path) -> Tuple[bool, str]:
+    """
+    Verify that a pickle file can be loaded and has correct structure.
+    
+    Parameters
+    ----------
+    filepath : Path
+        Path to pickle file
+        
+    Returns
+    -------
+    Tuple[bool, str]
+        (success, message)
+    """
+    try:
+        with open(filepath, 'rb') as f:
+            data = pickle.load(f)
+        
+        # Verify structure
+        if not isinstance(data, dict):
+            return False, "Data is not a dictionary"
+        
+        if len(data) != N_SIMULATIONS:
+            return False, f"Expected {N_SIMULATIONS} instances, got {len(data)}"
+        
+        # Verify keys are simulation IDs
+        expected_keys = set(range(1, N_SIMULATIONS + 1))
+        actual_keys = set(data.keys())
+        if expected_keys != actual_keys:
+            return False, f"Unexpected keys: {actual_keys}"
+        
+        # Verify all values are numpy arrays
+        for sim_id, adj_matrix in data.items():
+            if not isinstance(adj_matrix, np.ndarray):
+                return False, f"Instance {sim_id} is not a numpy array"
+            if adj_matrix.ndim != 2:
+                return False, f"Instance {sim_id} is not 2D"
+            if adj_matrix.shape[0] != adj_matrix.shape[1]:
+                return False, f"Instance {sim_id} is not square"
+        
+        return True, "Valid"
+    
+    except Exception as e:
+        return False, f"Error: {str(e)}"
+
+# Verify all generated files
+all_valid = True
+
+for graph_type, directory in OUTPUT_DIRS.items():
+    print(f"\n{graph_type} graphs:")
+    
+    files = sorted(directory.glob("*.p"))
+    
+    for filepath in files:
+        success, message = verify_pickle_file(filepath)
+        status = "[OK]" if success else "[FAIL]"
+        print(f"  {status} {filepath.name}: {message}")
+        
+        if not success:
+            all_valid = False
+
+if all_valid:
+    print("\n" + "=" * 70)
+    print("All files verified successfully")
+    print("=" * 70)
+else:
+    print("\n" + "=" * 70)
+    print("Some files failed verification - check errors above")
+    print("=" * 70)
+```
+
+# Density Alignment Analysis
+
+Verify that the generated graphs match target densities and identify any necessary parameter adjustments.
+
+```{python}
+#| label: density-analysis-prepare
+#| code-summary: "Prepare data for density analysis"
+
+import seaborn as sns
+import matplotlib.pyplot as plt
+
+# Combine all statistics into a single tidy dataframe
+all_stats = []
+
+for stat in rgg_stats:
+    all_stats.append({
+        'graph_type': 'RGG',
+        'n_nodes': stat['n_nodes'],
+        'target_density': stat['target_density'],
+        'actual_density': stat['actual_density_mean'],
+        'density_std': stat['actual_density_std'],
+    })
+
+for stat in rgg_3d_stats:
+    all_stats.append({
+        'graph_type': 'GEO3D',
+        'n_nodes': stat['n_nodes'],
+        'target_density': stat['target_density'],
+        'actual_density': stat['actual_density_mean'],
+        'density_std': stat['actual_density_std'],
+    })
+
+for stat in dd_stats:
+    all_stats.append({
+        'graph_type': 'DD',
+        'n_nodes': stat['n_nodes'],
+        'target_density': stat['target_density'],
+        'actual_density': stat['actual_density_mean'],
+        'density_std': stat['actual_density_std'],
+    })
+
+for stat in hk_stats:
+    all_stats.append({
+        'graph_type': 'HK',
+        'n_nodes': stat['n_nodes'],
+        'target_density': stat['target_density'],
+        'actual_density': stat['actual_density_mean'],
+        'density_std': stat['actual_density_std'],
+    })
+
+# Create tidy dataframe
+density_df = pd.DataFrame(all_stats)
+density_df['error'] = density_df['actual_density'] - density_df['target_density']
+density_df['relative_error_pct'] = 100 * density_df['error'] / density_df['target_density']
+
+print("\nDensity Alignment Summary:")
+print(density_df.to_string(index=False))
+```
+
+```{python}
+#| label: density-visualization
+#| code-summary: "Visualize density alignment"
+#| fig-width: 12
+#| fig-height: 8
+
+# Set seaborn style
+sns.set_theme(style="whitegrid", context="notebook")
+
+# Create figure with constrained layout
+fig = plt.figure(figsize=(12, 8), constrained_layout=True)
+gs = fig.add_gridspec(2, 2)
+
+# Plot 1: Target vs Actual Density (scatter)
+ax1 = fig.add_subplot(gs[0, 0])
+for graph_type in ['RGG', 'DD', 'HK']:
+    data = density_df[density_df['graph_type'] == graph_type]
+    ax1.errorbar(
+        data['target_density'], 
+        data['actual_density'],
+        yerr=data['density_std'],
+        fmt='o',
+        label=graph_type,
+        capsize=5,
+        alpha=0.7
+    )
+
+# Add diagonal reference line
+ax1.plot([0, 50], [0, 50], 'k--', alpha=0.3, label='Perfect alignment')
+ax1.set_xlabel('Target Density (%)')
+ax1.set_ylabel('Actual Density (%)')
+ax1.set_title('Target vs Actual Edge Density')
+ax1.legend()
+ax1.grid(True, alpha=0.3)
+
+# Plot 2: Absolute Error by Graph Type
+ax2 = fig.add_subplot(gs[0, 1])
+sns.barplot(
+    data=density_df,
+    x='graph_type',
+    y='error',
+    hue='target_density',
+    ax=ax2,
+    palette='Set2'
+)
+ax2.axhline(y=0, color='black', linestyle='-', linewidth=0.5)
+ax2.set_xlabel('Graph Type')
+ax2.set_ylabel('Density Error (%)')
+ax2.set_title('Absolute Density Error by Graph Type')
+ax2.legend(title='Target Density')
+
+# Plot 3: Relative Error by Node Count
+ax3 = fig.add_subplot(gs[1, 0])
+sns.boxplot(
+    data=density_df,
+    x='n_nodes',
+    y='relative_error_pct',
+    hue='graph_type',
+    ax=ax3,
+    palette='Set1'
+)
+ax3.axhline(y=0, color='black', linestyle='-', linewidth=0.5)
+ax3.axhline(y=10, color='red', linestyle='--', linewidth=0.5, alpha=0.3)
+ax3.axhline(y=-10, color='red', linestyle='--', linewidth=0.5, alpha=0.3)
+ax3.set_xlabel('Number of Nodes')
+ax3.set_ylabel('Relative Error (%)')
+ax3.set_title('Relative Density Error by Node Count')
+ax3.legend(title='Graph Type')
+
+# Plot 4: Density variability (std dev)
+ax4 = fig.add_subplot(gs[1, 1])
+sns.barplot(
+    data=density_df,
+    x='graph_type',
+    y='density_std',
+    hue='n_nodes',
+    ax=ax4,
+    palette='viridis'
+)
+ax4.set_xlabel('Graph Type')
+ax4.set_ylabel('Density Std Dev (%)')
+ax4.set_title('Density Variability Across Simulations')
+ax4.legend(title='Node Count')
+
+fig.suptitle('Graph Generation: Density Alignment Analysis', fontsize=14)
+
+plt.savefig('density_alignment_analysis.png', dpi=150, bbox_inches='tight')
+plt.show()
+```
+
+# Next Steps
+
+After running this notebook, you should:
+
+1. **Review Density Alignment**: Check the visualizations and recommendations above. If any configurations exceed the 10% error threshold, adjust parameters and regenerate those specific graph types.
+
+2. **Update Data Loading**: Modify `notebooks/00_Load_and_Process.qmd` to include the new graph types:
+   - Add `"GEO"`, `"DD"`, `"HK"` to the `GRAPH_TYPES` list
+   - Update the `INSTANCE_PATTERN` regex if needed
+
+3. **Run Experiments**: Execute your approximate symmetry algorithms on the new graph instances using `run.py`.
+
+4. **Compare Results**: Analyze how different graph structures affect the performance of various optimization methods.
+
+## Example: Loading Generated Graphs
+
+```python
+import pickle
+import networkx as nx
+from pathlib import Path
+
+# Load a specific graph instance
+data_file = Path("../data/pidnebesna/GEO/GEO_nNodes20_density15.p")
+with open(data_file, 'rb') as f:
+    instances = pickle.load(f)
+
+# Access a specific simulation
+sim_id = 1
+adj_matrix = instances[sim_id]
+
+# Convert to NetworkX graph
+G = nx.from_numpy_array(adj_matrix)
+
+print(f"Graph: {G.number_of_nodes()} nodes, {G.number_of_edges()} edges")
+```
+
+# References
+
+1. **Random Geometric Graphs**: 
+   - Dall, J., & Christensen, M. (2002). Random geometric graphs. Physical Review E, 66(1), 016121.
+   - Penrose, M. (2003). Random Geometric Graphs. Oxford University Press.
+
+2. **Duplication-Divergence Model**:
+   - Ispolatov, I., Krapivsky, P. L., & Yuryev, A. (2005). Duplication-divergence model of protein interaction network. Physical Review E, 71(6), 061911.
+
+3. **Holme-Kim Model**:
+   - Holme, P., & Kim, B. J. (2002). Growing scale-free networks with tunable clustering. Physical Review E, 65(2), 026107.
+
+4. **NetworkX Documentation**:
+   - NetworkX Geometric Generators: https://networkx.org/documentation/stable/reference/generators.html#geometric
+   - NetworkX Documentation: https://networkx.org/documentation/stable/
+

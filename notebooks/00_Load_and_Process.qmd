@@ -22,9 +22,9 @@ This notebook provides a comprehensive pipeline for loading and preprocessing gr
 ## Data Structure Overview
 
 The experiment results are organized as follows:
-- **Methods**: InteriorPoint, Manifold, QSA
+- **Methods**: InteriorPoint, Manifold, QSA, SoftSort, OT4P4AS
 - **Configurations**: Different parameter settings for each method
-- **Graph Types**: BA, ER, LRM_ER_rewired
+- **Graph Types**: BA, ER, LRM_ER_rewired, GEO (2D), GEO3D (3D), DD (Duplication-Divergence), HK (Holme-Kim)
 - **Instances**: Multiple simulations for different node counts and densities
 - **Runs**: Multiple algorithm runs with different random initializations
 
@@ -53,12 +53,16 @@ pd.options.mode.chained_assignment = None
 #| code-summary: "Configuration settings"
 
 # Directory paths
-RESULTS_DIR = Path("../results")
-DATA_DIR = Path("../data/pidnebesna")
+RESULTS_DIR = Path("results/brain")
+DATA_DIR = Path("../data/kubek")
+OUTPUT_DIR = Path("processed_data")
+
+# Output file configuration
+OUTPUT_FILENAME = "graph_symmetry_results_brain"
 
 # Directory names
-METHOD_DIRS = ["InteriorPoint", "Manifold", "QSA"]
-GRAPH_TYPES = ["BA", "ER", "LRM_ER_rewired"]
+METHOD_DIRS = ["InteriorPoint", "Manifold", "QSA", 'DimensionalityReduction', 'OrthogonalRelaxation']
+GRAPH_TYPES = ["BA", "ER", "LRM_ER_rewired", "GEO", "GEO3D", "DD", "HK", "BRAIN"]
 
 # Subdirectory names
 METRICS_SUBDIR = "Metrics"
@@ -68,7 +72,9 @@ CONFIG_FILE = "config.json"
 # File patterns
 INSTANCE_PATTERN = re.compile(
     r"(?P<graph_type>\w+)_nNodes(?P<n_nodes>\d+)_density(?P<density>\d+)"
-    r"(?:_rew(?P<rew>\d+))?_sim(?P<sim_id>\d+)"
+    r"(?:_rew(?P<rew>\d+))?"  # Optional rewiring parameter (LRM graphs)
+    r"(?:_[a-z]+[\d.]+)*"      # Optional graph-specific parameters (r=radius, p=prob, m=edges)
+    r"_sim(?P<sim_id>\d+)"
 )
 ```
 
@@ -167,10 +173,13 @@ def load_graph_instance(
 ) -> np.ndarray:
     """
     Load graph adjacency matrix from pickle file.
+    
+    This function handles both old-style filenames (without parameters) and 
+    new-style filenames (with encoded generator parameters like r=, p=, m=).
 
     Args:
         data_dir: Base data directory
-        graph_type: Type of graph (BA, ER, LRM_ER_rewired)
+        graph_type: Type of graph (BA, ER, LRM_ER_rewired, GEO, GEO3D, DD, HK)
         n_nodes: Number of nodes
         density: Graph density
         sim_id: Simulation ID
@@ -182,16 +191,34 @@ def load_graph_instance(
     # Handle different naming conventions
     if graph_type == "LRM_ER":
         graph_type_dir = "LRM_ER_rewired"
-        base_name = f"LRM_ER_nNodes{n_nodes}_density{density}_rew{rew}"
+        pattern_prefix = f"LRM_ER_nNodes{n_nodes}_density{density}_rew{rew}"
     else:
         graph_type_dir = graph_type
-        base_name = f"{graph_type}_nNodes{n_nodes}_density{density}"
+        pattern_prefix = f"{graph_type}_nNodes{n_nodes}_density{density}"
 
-    pickle_path = data_dir / graph_type_dir / f"{base_name}.p"
-
-    if not pickle_path.exists():
-        raise FileNotFoundError(f"Graph instance file not found: {pickle_path}")
-
+    graph_dir = data_dir / graph_type_dir
+    
+    if not graph_dir.exists():
+        raise FileNotFoundError(f"Graph type directory not found: {graph_dir}")
+    
+    # Try to find matching file with any parameter suffixes
+    # Pattern: {prefix}_sim{X}.p or {prefix}_{params}_sim{X}.p
+    matching_files = list(graph_dir.glob(f"{pattern_prefix}*.p"))
+    
+    if not matching_files:
+        raise FileNotFoundError(
+            f"No graph instance files found matching pattern: {graph_dir}/{pattern_prefix}*.p"
+        )
+    
+    # Raise error if multiple files match - this indicates ambiguous file naming
+    #if len(matching_files) > 1:
+    #    raise ValueError(
+    #        f"Multiple graph instance files found matching pattern {graph_dir}/{pattern_prefix}*.p: "
+    #        f"{[f.name for f in matching_files]}. File naming is ambiguous."
+    #    )
+    
+    pickle_path = matching_files[0]
+    
     with open(pickle_path, "rb") as f:
         data = pickle.load(f)
 
@@ -569,16 +596,17 @@ else:
 #| code-summary: "Save processed data for future use"
 
 # Save to multiple formats
-output_dir = Path("processed_data")
-output_dir.mkdir(exist_ok=True)
+OUTPUT_DIR.mkdir(exist_ok=True)
 
 # Save as pickle (preserves all data types including lists)
-df.to_pickle(output_dir / "graph_symmetry_results.pkl")
-print(f"Saved pickle file: {output_dir / 'graph_symmetry_results.pkl'}")
+pickle_path = OUTPUT_DIR / f"{OUTPUT_FILENAME}.pkl"
+df.to_pickle(pickle_path)
+print(f"Saved pickle file: {pickle_path}")
 
 # Save as CSV (note: permutation column will be string representation)
-df.to_csv(output_dir / "graph_symmetry_results.csv", index=False)
-print(f"Saved CSV file: {output_dir / 'graph_symmetry_results.csv'}")
+csv_path = OUTPUT_DIR / f"{OUTPUT_FILENAME}.csv"
+df.to_csv(csv_path, index=False)
+print(f"Saved CSV file: {csv_path}")
 
 # Save summary statistics
 # with pd.ExcelWriter(output_dir / "graph_symmetry_summary.xlsx") as writer:

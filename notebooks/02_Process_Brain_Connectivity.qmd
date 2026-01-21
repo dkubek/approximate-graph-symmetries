@@ -1,0 +1,877 @@
+---
+title: "Process Brain Connectivity Data"
+author: "David Kubek"
+date: today
+format:
+  html:
+    toc: true
+    toc-depth: 3
+    code-fold: false
+    code-summary: "Show code"
+    code-line-numbers: true
+    code-annotations: hover
+execute:
+  warning: false
+  message: false
+  eval: false
+---
+
+# Introduction
+
+This notebook processes structural connectivity (SC) matrices from brain imaging data into the standardized format used for approximate graph symmetry experiments.
+
+## Data Source
+
+The input data consists of **88 individual brain structural connectivity matrices** from neuroimaging studies. Each matrix represents weighted connections between 90 brain regions.
+
+**Raw Data Properties**:
+- **Format**: CSV files (S001.csv to S088.csv)
+- **Size**: 90 × 90 weighted adjacency matrices
+- **Edge weights**: Continuous values in [0, 1]
+- **Directionality**: Asymmetric (directional connectivity)
+- **Self-loops**: Diagonal elements = 1.0
+- **Current density**: ~76% (very dense)
+
+## Processing Pipeline
+
+Following the methodology from the reference paper ("Average SC matrix, thresholded to the density of 5 percent"), we apply the following transformations:
+
+1. **Symmetrization**: Convert directional connectivity to undirected via `A_sym = (A + A.T) / 2`
+2. **Remove self-loops**: Set diagonal to 0 (standard simple graph assumption)
+3. **Density thresholding**: Retain only the top 5% of edges by weight, binarize to {0, 1}
+4. **Standardization**: Convert to the pickle format used by other graph types
+
+**Output**:
+- Single pickle file: `BRAIN_nNodes90_density5.p`
+- Structure: `Dict[int, np.ndarray]` mapping subject IDs (0-87) to 90×90 binary symmetric matrices
+- Storage location: `data/kubek/BRAIN/`
+
+# Setup and Configuration
+
+```{python}
+#| label: imports
+#| code-summary: "Import required libraries"
+
+import pickle
+from pathlib import Path
+from typing import Dict, List, Tuple
+
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+import seaborn as sns
+```
+
+```{python}
+#| label: constants
+#| code-summary: "Global configuration constants"
+
+# Directory configuration
+INPUT_DIR = Path("../data/brain")
+OUTPUT_DIR = Path("../data/kubek/BRAIN")
+
+# Processing parameters
+N_SUBJECTS = 88  # Total number of brain connectivity matrices
+N_REGIONS = 90   # Number of brain regions (nodes)
+TARGET_DENSITY = 5.0  # Target edge density in percent
+
+# File naming
+OUTPUT_FILENAME = f"BRAIN_nNodes{N_REGIONS}_density{int(TARGET_DENSITY)}.p"
+
+# Visualization configuration
+FIGSIZE_SINGLE = (10, 8)
+FIGSIZE_GRID = (15, 10)
+```
+
+```{python}
+#| label: create-output-dir
+#| code-summary: "Create output directory"
+
+OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+print(f"Output directory: {OUTPUT_DIR}")
+print(f"Output file: {OUTPUT_FILENAME}")
+```
+
+# Helper Functions
+
+```{python}
+#| label: loading-functions
+#| code-summary: "Functions for loading brain connectivity matrices"
+
+def load_brain_matrix(filepath: Path) -> np.ndarray:
+    """
+    Load a brain connectivity matrix from CSV file.
+    
+    Parameters
+    ----------
+    filepath : Path
+        Path to CSV file
+        
+    Returns
+    -------
+    np.ndarray
+        Connectivity matrix as numpy array
+    """
+    df = pd.read_csv(filepath, header=None)
+    return df.values
+
+
+def load_all_subjects(input_dir: Path, n_subjects: int = N_SUBJECTS) -> Dict[int, np.ndarray]:
+    """
+    Load all subject connectivity matrices.
+    
+    Parameters
+    ----------
+    input_dir : Path
+        Directory containing CSV files
+    n_subjects : int, default=N_SUBJECTS
+        Number of subjects to load
+        
+    Returns
+    -------
+    Dict[int, np.ndarray]
+        Dictionary mapping subject IDs (0-based) to connectivity matrices
+    """
+    subjects = {}
+    
+    for subject_id in range(n_subjects):
+        # File naming: S001.csv to S088.csv (1-based)
+        filename = f"S{subject_id + 1:03d}.csv"
+        filepath = input_dir / filename
+        
+        if not filepath.exists():
+            raise FileNotFoundError(f"Subject file not found: {filepath}")
+        
+        subjects[subject_id] = load_brain_matrix(filepath)
+        
+    return subjects
+```
+
+```{python}
+#| label: processing-functions
+#| code-summary: "Functions for processing connectivity matrices"
+
+def symmetrize_matrix(A: np.ndarray) -> np.ndarray:
+    """
+    Symmetrize a potentially asymmetric connectivity matrix.
+    
+    Uses the average of forward and backward connections:
+    A_sym[i,j] = (A[i,j] + A[j,i]) / 2
+    
+    Parameters
+    ----------
+    A : np.ndarray
+        Input connectivity matrix (may be asymmetric)
+        
+    Returns
+    -------
+    np.ndarray
+        Symmetric connectivity matrix
+    """
+    return (A + A.T) / 2
+
+
+def remove_diagonal(A: np.ndarray) -> np.ndarray:
+    """
+    Remove self-loops by setting diagonal to zero.
+    
+    Parameters
+    ----------
+    A : np.ndarray
+        Input connectivity matrix
+        
+    Returns
+    -------
+    np.ndarray
+        Matrix with diagonal set to zero (copy, not in-place)
+    """
+    A_no_diag = A.copy()
+    np.fill_diagonal(A_no_diag, 0)
+    return A_no_diag
+
+
+def compute_edge_density(A: np.ndarray) -> float:
+    """
+    Compute edge density as percentage of possible edges.
+    
+    Density = (# of non-zero edges) / (n * (n-1) / 2) * 100
+    
+    Parameters
+    ----------
+    A : np.ndarray
+        Adjacency matrix (assumed symmetric, no self-loops)
+        
+    Returns
+    -------
+    float
+        Edge density as percentage
+    """
+    n = A.shape[0]
+    max_edges = n * (n - 1) / 2
+    num_edges = np.sum(A > 0) / 2  # Divide by 2 for symmetric matrix
+    return 100.0 * num_edges / max_edges
+
+
+def threshold_to_density(A: np.ndarray, target_density: float) -> np.ndarray:
+    """
+    Threshold weighted matrix to achieve target density.
+    
+    Retains the top K% of edges by weight and binarizes to {0, 1}.
+    
+    Algorithm:
+    1. Extract upper triangle (symmetric matrix)
+    2. Sort edges by weight in descending order
+    3. Determine threshold: keep top K edges where K = density * n(n-1)/2
+    4. Binarize: edges above threshold -> 1, else -> 0
+    5. Symmetrize result
+    
+    Parameters
+    ----------
+    A : np.ndarray
+        Weighted connectivity matrix (symmetric, no diagonal)
+    target_density : float
+        Target edge density as percentage (0-100)
+        
+    Returns
+    -------
+    np.ndarray
+        Binary adjacency matrix with specified density
+    """
+    n = A.shape[0]
+    
+    # Calculate number of edges to keep
+    max_edges = n * (n - 1) / 2
+    k_edges = int(np.round(target_density / 100.0 * max_edges))
+    
+    # Extract upper triangle (symmetric matrix, so only need one triangle)
+    upper_triangle_indices = np.triu_indices(n, k=1)
+    edge_weights = A[upper_triangle_indices]
+    
+    # Sort to find threshold
+    sorted_weights = np.sort(edge_weights)[::-1]  # Descending order
+    
+    if k_edges == 0:
+        threshold = np.inf  # No edges
+    elif k_edges >= len(sorted_weights):
+        threshold = 0  # Keep all edges
+    else:
+        # Threshold is the weight of the k-th strongest edge
+        threshold = sorted_weights[k_edges - 1]
+    
+    # Binarize
+    A_binary = (A >= threshold).astype(float)
+    
+    # Ensure exactly the right number of edges (handle ties at threshold)
+    current_edges = np.sum(A_binary[upper_triangle_indices])
+    
+    if current_edges > k_edges:
+        # Too many edges due to ties - need to break ties
+        # Keep the strongest k_edges
+        edge_indices_sorted = np.argsort(edge_weights)[::-1]  # Descending
+        
+        A_binary = np.zeros_like(A)
+        for idx in edge_indices_sorted[:k_edges]:
+            i, j = upper_triangle_indices[0][idx], upper_triangle_indices[1][idx]
+            A_binary[i, j] = 1.0
+            A_binary[j, i] = 1.0  # Symmetrize
+    
+    # Ensure symmetry and no diagonal
+    A_binary = (A_binary + A_binary.T) / 2
+    np.fill_diagonal(A_binary, 0)
+    
+    return A_binary
+
+
+def process_subject(A_raw: np.ndarray, target_density: float) -> np.ndarray:
+    """
+    Full processing pipeline for a single subject.
+    
+    Steps:
+    1. Symmetrize
+    2. Remove diagonal
+    3. Threshold to target density
+    
+    Parameters
+    ----------
+    A_raw : np.ndarray
+        Raw connectivity matrix from CSV
+    target_density : float
+        Target edge density as percentage
+        
+    Returns
+    -------
+    np.ndarray
+        Processed binary adjacency matrix
+    """
+    A_sym = symmetrize_matrix(A_raw)
+    A_no_diag = remove_diagonal(A_sym)
+    A_binary = threshold_to_density(A_no_diag, target_density)
+    
+    return A_binary
+```
+
+```{python}
+#| label: validation-functions
+#| code-summary: "Functions for validating processed matrices"
+
+def validate_matrix(A: np.ndarray, subject_id: int, 
+                   expected_nodes: int = N_REGIONS,
+                   expected_density: float = TARGET_DENSITY,
+                   tolerance: float = 0.5) -> Tuple[bool, str]:
+    """
+    Validate that a processed matrix meets specifications.
+    
+    Parameters
+    ----------
+    A : np.ndarray
+        Matrix to validate
+    subject_id : int
+        Subject identifier (for error messages)
+    expected_nodes : int, default=N_REGIONS
+        Expected number of nodes
+    expected_density : float, default=TARGET_DENSITY
+        Expected edge density (percentage)
+    tolerance : float, default=0.5
+        Acceptable deviation from target density (percentage points)
+        
+    Returns
+    -------
+    Tuple[bool, str]
+        (is_valid, message)
+    """
+    # Check shape
+    if A.shape != (expected_nodes, expected_nodes):
+        return False, f"Subject {subject_id}: Wrong shape {A.shape}, expected ({expected_nodes}, {expected_nodes})"
+    
+    # Check symmetry
+    if not np.allclose(A, A.T):
+        return False, f"Subject {subject_id}: Matrix is not symmetric"
+    
+    # Check diagonal
+    if not np.allclose(np.diag(A), 0):
+        return False, f"Subject {subject_id}: Diagonal is not zero"
+    
+    # Check binary
+    unique_values = np.unique(A)
+    if not np.all(np.isin(unique_values, [0.0, 1.0])):
+        return False, f"Subject {subject_id}: Matrix is not binary (unique values: {unique_values})"
+    
+    # Check density
+    actual_density = compute_edge_density(A)
+    if abs(actual_density - expected_density) > tolerance:
+        return False, f"Subject {subject_id}: Density {actual_density:.2f}% differs from target {expected_density:.2f}%"
+    
+    return True, f"Subject {subject_id}: Valid"
+```
+
+# Data Loading
+
+```{python}
+#| label: load-data
+#| code-summary: "Load all subject connectivity matrices"
+
+print("Loading brain connectivity data...")
+print("=" * 70)
+
+raw_subjects = load_all_subjects(INPUT_DIR, N_SUBJECTS)
+
+print(f"Loaded {len(raw_subjects)} subjects")
+print(f"Matrix dimensions: {raw_subjects[0].shape}")
+print(f"Data type: {raw_subjects[0].dtype}")
+print("=" * 70)
+```
+
+# Exploratory Analysis
+
+## Raw Data Properties
+
+```{python}
+#| label: analyze-raw-data
+#| code-summary: "Analyze properties of raw connectivity matrices"
+
+print("\nRAW DATA ANALYSIS")
+print("=" * 70)
+
+# Analyze first subject as example
+example_subject = raw_subjects[0]
+
+print(f"Example Subject (S001):")
+print(f"  Shape: {example_subject.shape}")
+print(f"  Min value: {example_subject.min():.6f}")
+print(f"  Max value: {example_subject.max():.6f}")
+print(f"  Mean value: {example_subject.mean():.6f}")
+print(f"  Median value: {np.median(example_subject):.6f}")
+print(f"  Symmetric: {np.allclose(example_subject, example_subject.T)}")
+print(f"  Diagonal (min, max): ({np.diag(example_subject).min():.2f}, {np.diag(example_subject).max():.2f})")
+
+# Compute density statistics across all subjects
+print(f"\nDensity Statistics (Raw Data):")
+densities = []
+for subject_id, A in raw_subjects.items():
+    # Remove diagonal for density computation
+    A_no_diag = A.copy()
+    np.fill_diagonal(A_no_diag, 0)
+    density = compute_edge_density(A_no_diag)
+    densities.append(density)
+
+densities = np.array(densities)
+print(f"  Mean density: {densities.mean():.2f}%")
+print(f"  Std density: {densities.std():.2f}%")
+print(f"  Min density: {densities.min():.2f}%")
+print(f"  Max density: {densities.max():.2f}%")
+
+print("=" * 70)
+```
+
+## Weight Distribution
+
+```{python}
+#| label: plot-weight-distribution
+#| code-summary: "Visualize distribution of edge weights"
+
+fig, axes = plt.subplots(1, 2, figsize=(14, 5), constrained_layout=True)
+
+# Plot 1: Histogram of all edge weights (excluding diagonal)
+all_weights = []
+for A in raw_subjects.values():
+    upper_triangle = np.triu_indices(N_REGIONS, k=1)
+    all_weights.extend(A[upper_triangle])
+
+axes[0].hist(all_weights, bins=100, edgecolor='black', alpha=0.7)
+axes[0].set_xlabel('Edge Weight')
+axes[0].set_ylabel('Frequency')
+axes[0].set_title('Distribution of Edge Weights (All Subjects)')
+axes[0].set_yscale('log')
+axes[0].grid(True, alpha=0.3)
+
+# Plot 2: Density of edge weights
+axes[1].hist(all_weights, bins=100, density=True, cumulative=True, 
+             histtype='step', linewidth=2)
+axes[1].axhline(y=0.95, color='r', linestyle='--', label='95th percentile (top 5%)')
+axes[1].set_xlabel('Edge Weight')
+axes[1].set_ylabel('Cumulative Probability')
+axes[1].set_title('Cumulative Distribution of Edge Weights')
+axes[1].legend()
+axes[1].grid(True, alpha=0.3)
+
+plt.show()
+
+# Compute threshold for 5% density
+threshold_5pct = np.percentile(all_weights, 95)
+print(f"Weight threshold for top 5% edges: {threshold_5pct:.6f}")
+```
+
+## Asymmetry Analysis
+
+```{python}
+#| label: analyze-asymmetry
+#| code-summary: "Quantify asymmetry in connectivity matrices"
+
+print("\nASYMMETRY ANALYSIS")
+print("=" * 70)
+
+asymmetry_metrics = []
+
+for subject_id, A in raw_subjects.items():
+    # Remove diagonal
+    A_no_diag = A.copy()
+    np.fill_diagonal(A_no_diag, 0)
+    
+    # Compute asymmetry index: ||A - A.T||_F / ||A||_F
+    asymmetry_norm = np.linalg.norm(A_no_diag - A_no_diag.T, 'fro')
+    matrix_norm = np.linalg.norm(A_no_diag, 'fro')
+    asymmetry_index = asymmetry_norm / matrix_norm if matrix_norm > 0 else 0
+    
+    asymmetry_metrics.append({
+        'subject_id': subject_id,
+        'asymmetry_index': asymmetry_index,
+        'asymmetry_norm': asymmetry_norm,
+        'matrix_norm': matrix_norm
+    })
+
+asymmetry_df = pd.DataFrame(asymmetry_metrics)
+
+print(f"Asymmetry Index Statistics:")
+print(f"  Mean: {asymmetry_df['asymmetry_index'].mean():.4f}")
+print(f"  Std: {asymmetry_df['asymmetry_index'].std():.4f}")
+print(f"  Min: {asymmetry_df['asymmetry_index'].min():.4f}")
+print(f"  Max: {asymmetry_df['asymmetry_index'].max():.4f}")
+
+print(f"\nMost asymmetric subjects:")
+print(asymmetry_df.nlargest(5, 'asymmetry_index')[['subject_id', 'asymmetry_index']])
+
+print(f"\nMost symmetric subjects:")
+print(asymmetry_df.nsmallest(5, 'asymmetry_index')[['subject_id', 'asymmetry_index']])
+
+print("=" * 70)
+```
+
+# Processing Pipeline
+
+```{python}
+#| label: process-all-subjects
+#| code-summary: "Apply full processing pipeline to all subjects"
+
+print("\nPROCESSING BRAIN CONNECTIVITY MATRICES")
+print("=" * 70)
+
+processed_subjects = {}
+
+for subject_id, A_raw in raw_subjects.items():
+    # Apply processing pipeline
+    A_processed = process_subject(A_raw, TARGET_DENSITY)
+    processed_subjects[subject_id] = A_processed
+    
+    # Print progress
+    if (subject_id + 1) % 10 == 0:
+        print(f"Processed {subject_id + 1}/{N_SUBJECTS} subjects")
+
+print(f"\nProcessing complete: {len(processed_subjects)} subjects")
+print("=" * 70)
+```
+
+# Validation
+
+```{python}
+#| label: validate-processed
+#| code-summary: "Validate all processed matrices"
+
+print("\nVALIDATION")
+print("=" * 70)
+
+validation_results = []
+all_valid = True
+
+for subject_id, A in processed_subjects.items():
+    is_valid, message = validate_matrix(A, subject_id)
+    validation_results.append({
+        'subject_id': subject_id,
+        'valid': is_valid,
+        'message': message
+    })
+    
+    if not is_valid:
+        print(f"[FAIL] {message}")
+        all_valid = False
+
+if all_valid:
+    print("[OK] All subjects passed validation")
+else:
+    print(f"[FAIL] {sum(not r['valid'] for r in validation_results)} subjects failed validation")
+
+print("=" * 70)
+```
+
+## Processed Data Statistics
+
+```{python}
+#| label: analyze-processed
+#| code-summary: "Analyze properties of processed matrices"
+
+print("\nPROCESSED DATA STATISTICS")
+print("=" * 70)
+
+# Compute statistics
+processed_densities = []
+processed_edges = []
+
+for subject_id, A in processed_subjects.items():
+    density = compute_edge_density(A)
+    n_edges = np.sum(A > 0) / 2  # Symmetric matrix
+    
+    processed_densities.append(density)
+    processed_edges.append(n_edges)
+
+processed_densities = np.array(processed_densities)
+processed_edges = np.array(processed_edges)
+
+print(f"Edge Density:")
+print(f"  Target: {TARGET_DENSITY:.2f}%")
+print(f"  Mean: {processed_densities.mean():.2f}%")
+print(f"  Std: {processed_densities.std():.4f}%")
+print(f"  Min: {processed_densities.min():.2f}%")
+print(f"  Max: {processed_densities.max():.2f}%")
+print(f"  Deviation from target: {abs(processed_densities.mean() - TARGET_DENSITY):.4f}%")
+
+print(f"\nNumber of Edges:")
+print(f"  Mean: {processed_edges.mean():.1f}")
+print(f"  Std: {processed_edges.std():.2f}")
+print(f"  Min: {int(processed_edges.min())}")
+print(f"  Max: {int(processed_edges.max())}")
+
+max_possible_edges = N_REGIONS * (N_REGIONS - 1) / 2
+expected_edges = TARGET_DENSITY / 100.0 * max_possible_edges
+print(f"  Expected (from target density): {expected_edges:.1f}")
+
+print("=" * 70)
+```
+
+# Visualization
+
+## Density Distribution
+
+```{python}
+#| label: plot-density-distribution
+#| code-summary: "Visualize density distribution across subjects"
+
+fig, axes = plt.subplots(1, 2, figsize=(14, 5), constrained_layout=True)
+
+# Plot 1: Histogram of densities
+axes[0].hist(processed_densities, bins=20, edgecolor='black', alpha=0.7)
+axes[0].axvline(x=TARGET_DENSITY, color='r', linestyle='--', linewidth=2, 
+                label=f'Target ({TARGET_DENSITY}%)')
+axes[0].set_xlabel('Edge Density (%)')
+axes[0].set_ylabel('Number of Subjects')
+axes[0].set_title('Distribution of Edge Densities (Processed Data)')
+axes[0].legend()
+axes[0].grid(True, alpha=0.3)
+
+# Plot 2: Deviation from target
+deviations = processed_densities - TARGET_DENSITY
+axes[1].hist(deviations, bins=20, edgecolor='black', alpha=0.7, color='orange')
+axes[1].axvline(x=0, color='r', linestyle='--', linewidth=2, label='Zero deviation')
+axes[1].set_xlabel('Deviation from Target Density (%)')
+axes[1].set_ylabel('Number of Subjects')
+axes[1].set_title('Density Deviation Distribution')
+axes[1].legend()
+axes[1].grid(True, alpha=0.3)
+
+plt.show()
+```
+
+## Example Matrix Visualizations
+
+```{python}
+#| label: plot-example-matrices
+#| code-summary: "Visualize raw and processed matrices for example subjects"
+
+# Select 3 subjects: low, medium, high asymmetry
+example_subjects = [
+    asymmetry_df.nsmallest(1, 'asymmetry_index').iloc[0]['subject_id'],
+    asymmetry_df.iloc[len(asymmetry_df) // 2]['subject_id'],
+    asymmetry_df.nlargest(1, 'asymmetry_index').iloc[0]['subject_id']
+]
+
+fig, axes = plt.subplots(3, 3, figsize=(15, 15), constrained_layout=True)
+
+for row, subject_id in enumerate(example_subjects):
+    # Get matrices
+    A_raw = raw_subjects[int(subject_id)]
+    A_sym = symmetrize_matrix(A_raw)
+    A_processed = processed_subjects[int(subject_id)]
+    
+    # Get asymmetry index
+    asym_idx = asymmetry_df.loc[asymmetry_df['subject_id'] == subject_id, 'asymmetry_index'].values[0]
+    
+    # Plot raw
+    im0 = axes[row, 0].imshow(A_raw, cmap='viridis', aspect='auto')
+    axes[row, 0].set_title(f'S{int(subject_id)+1:03d} Raw\n(Asym={asym_idx:.4f})')
+    axes[row, 0].set_xlabel('Region')
+    axes[row, 0].set_ylabel('Region')
+    plt.colorbar(im0, ax=axes[row, 0], fraction=0.046, pad=0.04)
+    
+    # Plot symmetrized
+    im1 = axes[row, 1].imshow(A_sym, cmap='viridis', aspect='auto')
+    axes[row, 1].set_title(f'S{int(subject_id)+1:03d} Symmetrized')
+    axes[row, 1].set_xlabel('Region')
+    axes[row, 1].set_ylabel('Region')
+    plt.colorbar(im1, ax=axes[row, 1], fraction=0.046, pad=0.04)
+    
+    # Plot processed
+    im2 = axes[row, 2].imshow(A_processed, cmap='binary', aspect='auto')
+    density = compute_edge_density(A_processed)
+    axes[row, 2].set_title(f'S{int(subject_id)+1:03d} Processed\n(Density={density:.2f}%)')
+    axes[row, 2].set_xlabel('Region')
+    axes[row, 2].set_ylabel('Region')
+    plt.colorbar(im2, ax=axes[row, 2], fraction=0.046, pad=0.04)
+
+fig.suptitle('Processing Pipeline: Raw → Symmetrized → Thresholded (5%)', 
+             fontsize=16, y=1.00)
+
+plt.show()
+```
+
+## Comparison: Raw vs Processed
+
+```{python}
+#| label: plot-before-after-comparison
+#| code-summary: "Compare distributions before and after processing"
+
+fig, axes = plt.subplots(2, 2, figsize=(14, 10), constrained_layout=True)
+
+# Densities: Before and After
+raw_densities = []
+for A in raw_subjects.values():
+    A_no_diag = A.copy()
+    np.fill_diagonal(A_no_diag, 0)
+    raw_densities.append(compute_edge_density(A_no_diag))
+
+axes[0, 0].hist([raw_densities, processed_densities], bins=30, label=['Raw', 'Processed'],
+                alpha=0.7, edgecolor='black')
+axes[0, 0].axvline(x=TARGET_DENSITY, color='r', linestyle='--', linewidth=2,
+                   label=f'Target ({TARGET_DENSITY}%)')
+axes[0, 0].set_xlabel('Edge Density (%)')
+axes[0, 0].set_ylabel('Number of Subjects')
+axes[0, 0].set_title('Edge Density: Before vs After Processing')
+axes[0, 0].legend()
+axes[0, 0].grid(True, alpha=0.3)
+
+# Number of edges
+raw_edges = [(np.sum(A > 0) - N_REGIONS) / 2 for A in raw_subjects.values()]  # Subtract diagonal
+axes[0, 1].hist([raw_edges, processed_edges], bins=30, label=['Raw', 'Processed'],
+                alpha=0.7, edgecolor='black')
+axes[0, 1].set_xlabel('Number of Edges')
+axes[0, 1].set_ylabel('Number of Subjects')
+axes[0, 1].set_title('Edge Count: Before vs After Processing')
+axes[0, 1].legend()
+axes[0, 1].grid(True, alpha=0.3)
+
+# Edge weight statistics (only for raw data)
+raw_mean_weights = [np.mean(A[np.triu_indices(N_REGIONS, k=1)]) for A in raw_subjects.values()]
+axes[1, 0].hist(raw_mean_weights, bins=30, alpha=0.7, edgecolor='black', color='skyblue')
+axes[1, 0].set_xlabel('Mean Edge Weight')
+axes[1, 0].set_ylabel('Number of Subjects')
+axes[1, 0].set_title('Mean Edge Weight Distribution (Raw Data)')
+axes[1, 0].grid(True, alpha=0.3)
+
+# Sparsity comparison
+raw_sparsity = [100 - d for d in raw_densities]
+processed_sparsity = [100 - d for d in processed_densities]
+axes[1, 1].hist([raw_sparsity, processed_sparsity], bins=30, label=['Raw', 'Processed'],
+                alpha=0.7, edgecolor='black')
+axes[1, 1].set_xlabel('Sparsity (%)')
+axes[1, 1].set_ylabel('Number of Subjects')
+axes[1, 1].set_title('Graph Sparsity: Before vs After Processing')
+axes[1, 1].legend()
+axes[1, 1].grid(True, alpha=0.3)
+
+plt.show()
+```
+
+# Save Processed Data
+
+```{python}
+#| label: save-pickle
+#| code-summary: "Save processed matrices to pickle file"
+
+output_path = OUTPUT_DIR / OUTPUT_FILENAME
+
+print("\nSAVING PROCESSED DATA")
+print("=" * 70)
+print(f"Output file: {output_path}")
+
+# Save to pickle
+with open(output_path, 'wb') as f:
+    pickle.dump(processed_subjects, f, protocol=pickle.HIGHEST_PROTOCOL)
+
+print(f"[OK] Saved {len(processed_subjects)} subjects to {output_path}")
+print(f"File size: {output_path.stat().st_size / 1024 / 1024:.2f} MB")
+print("=" * 70)
+```
+
+# Verification
+
+```{python}
+#| label: verify-saved-file
+#| code-summary: "Verify that saved file can be loaded correctly"
+
+print("\nVERIFICATION OF SAVED FILE")
+print("=" * 70)
+
+# Load the file we just saved
+with open(output_path, 'rb') as f:
+    loaded_data = pickle.load(f)
+
+# Verify structure
+print(f"[CHECK] Data type: {type(loaded_data)}")
+assert isinstance(loaded_data, dict), "Data should be a dictionary"
+print("[OK] Data is a dictionary")
+
+print(f"[CHECK] Number of subjects: {len(loaded_data)}")
+assert len(loaded_data) == N_SUBJECTS, f"Expected {N_SUBJECTS} subjects"
+print(f"[OK] Contains {N_SUBJECTS} subjects")
+
+print(f"[CHECK] Keys: {list(loaded_data.keys())[:5]}... (showing first 5)")
+expected_keys = set(range(N_SUBJECTS))
+actual_keys = set(loaded_data.keys())
+assert expected_keys == actual_keys, f"Key mismatch"
+print(f"[OK] Keys are 0-{N_SUBJECTS-1}")
+
+# Verify a sample matrix
+sample_matrix = loaded_data[0]
+print(f"[CHECK] Sample matrix (subject 0):")
+print(f"  Shape: {sample_matrix.shape}")
+print(f"  Data type: {sample_matrix.dtype}")
+print(f"  Min value: {sample_matrix.min()}")
+print(f"  Max value: {sample_matrix.max()}")
+print(f"  Density: {compute_edge_density(sample_matrix):.2f}%")
+
+assert sample_matrix.shape == (N_REGIONS, N_REGIONS), "Wrong shape"
+assert np.allclose(sample_matrix, sample_matrix.T), "Not symmetric"
+assert np.allclose(np.diag(sample_matrix), 0), "Diagonal not zero"
+print("[OK] Sample matrix is valid")
+
+print("\n" + "=" * 70)
+print("VERIFICATION COMPLETE - FILE IS READY FOR EXPERIMENTS")
+print("=" * 70)
+```
+
+# Summary
+
+```{python}
+#| label: final-summary
+#| code-summary: "Print final summary of processing"
+
+print("\n" + "=" * 70)
+print("BRAIN CONNECTIVITY PROCESSING SUMMARY")
+print("=" * 70)
+
+print(f"\nInput:")
+print(f"  Directory: {INPUT_DIR}")
+print(f"  Files: S001.csv to S{N_SUBJECTS:03d}.csv")
+print(f"  Total subjects: {N_SUBJECTS}")
+
+print(f"\nProcessing:")
+print(f"  1. Symmetrization: A_sym = (A + A.T) / 2")
+print(f"  2. Remove diagonal: A[i,i] = 0")
+print(f"  3. Threshold to {TARGET_DENSITY}% density (top-K edges, binarize)")
+
+print(f"\nOutput:")
+print(f"  File: {output_path}")
+print(f"  Format: Dict[int, np.ndarray] with keys 0-{N_SUBJECTS-1}")
+print(f"  Matrix size: {N_REGIONS} × {N_REGIONS}")
+print(f"  Matrix properties: Binary, symmetric, no self-loops")
+print(f"  Edge density: {processed_densities.mean():.2f}% ± {processed_densities.std():.4f}%")
+print(f"  Number of edges: {processed_edges.mean():.1f} ± {processed_edges.std():.2f}")
+
+print(f"\nNext Steps:")
+print(f"  1. Add 'BRAIN' to GRAPH_TYPES in 00_Load_and_Process.qmd")
+print(f"  2. Run experiments with: uv run run.py --methods QSA --data-path data/kubek")
+print(f"  3. Analyze results alongside other graph types")
+
+print("=" * 70)
+```
+
+# Integration Notes
+
+To integrate this brain connectivity data into your existing analysis pipeline:
+
+1. **Update `00_Load_and_Process.qmd`**:
+   ```python
+   GRAPH_TYPES = ["BA", "ER", "LRM_ER_rewired", "GEO", "GEO3D", "DD", "HK", "BRAIN"]
+   ```
+
+2. **File naming convention**: The brain data follows the established pattern:
+   - `BRAIN_nNodes90_density5.p`
+   - Contains 88 subjects (keys 0-87) instead of the usual 39 simulations
+   - Loading code will work automatically via glob pattern matching
+
+3. **Experimental considerations**:
+   - Brain graphs have 90 nodes (different from synthetic graphs: 20, 50, 100)
+   - Single density level (5%) versus multiple densities for synthetic graphs
+   - Real-world data may exhibit different symmetry properties than synthetic models
+
+4. **Analysis considerations**:
+   - When comparing across graph types, consider normalizing by graph size
+   - Brain graphs represent biological structure, not random/generative models
+   - May serve as a validation dataset for approximate symmetry methods

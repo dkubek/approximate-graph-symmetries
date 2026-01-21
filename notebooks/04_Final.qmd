@@ -50,7 +50,7 @@ structural properties:
 - Erdős-Rényi (ER) random graphs
 - Barabási-Albert (BA) scale-free networks representing real-world structures
 - Lateral Random Model (LRM) networks providing controlled approximate symmetries
-- Random Geometric Graphs (GEO) in 2D Euclidean space modeling spatial networks
+- Random Geometric Graphs (GEO2D) in 2D Euclidean space modeling spatial networks
 - Random Geometric Graphs (GEO3D) in 3D Euclidean space for volumetric networks
 - Duplication-Divergence (DD) networks simulating biological network evolution
 - Holme-Kim (HK) scale-free networks with tunable clustering coefficients
@@ -139,14 +139,17 @@ METHOD_NAMES = {
     'QSA': 'QSA',
     'Manifold': 'MF',
     'InteriorPoint': 'IP',
-    'SoftSort': 'DR',
     'DimensionalityReduction': 'DR',
-    'OT4P4AS': 'OR',
     'OrthogonalRelaxation': 'OR',
 }
 
 # Set the color palette
 sns.set_palette(list(METHOD_COLORS.values()))
+
+# Define graph type constants
+STANDARD_GRAPH_TYPES = ["ER", "BA", "GEO2D", "GEO3D", "DD", "HK", "BRAIN"]
+ALL_GRAPH_TYPES = ["ER", "BA", "LRM", "GEO2D", "GEO3D", "DD", "HK", "BRAIN"]
+STANDARD_WITH_LRM = ["ER", "BA", "GEO2D", "GEO3D", "DD", "HK", "LRM", "BRAIN"]
 
 # Create output directory for figures
 figure_dir = Path("figures")
@@ -161,8 +164,26 @@ def save_figure(fig, name):
     fig.savefig(figure_dir / f"{name}.pdf", format='pdf', backend='pgf')
 
 
-def save_table(df, name, caption="", show_index=None, **kwargs):
-    """Export table to publication-ready LaTeX with full MultiIndex support"""
+def save_table(df, name, caption="", show_index=None, longtable=False, **kwargs):
+    """Export table to publication-ready LaTeX with full MultiIndex support.
+    
+    Parameters
+    ----------
+    df : pd.DataFrame
+        DataFrame to export
+    name : str
+        Output filename (without .tex extension)
+    caption : str
+        Table caption
+    show_index : bool, optional
+        Whether to show the index. Auto-detected if None.
+    longtable : bool
+        Whether to use longtable environment (for multi-page tables).
+        Default False uses regular tabular wrapped in table environment.
+    **kwargs
+        Additional arguments passed to df.to_latex()
+    """
+    import re
     
     # Auto-detect if we should show index
     if show_index is None:
@@ -171,21 +192,31 @@ def save_table(df, name, caption="", show_index=None, **kwargs):
     has_multiindex_rows = isinstance(df.index, pd.MultiIndex) and show_index
     has_multiindex_cols = isinstance(df.columns, pd.MultiIndex)
     
-    # Dynamic column formatting
-    col_formats = []
-    if show_index:
-        if has_multiindex_rows:
-            col_formats.extend(['l'] * df.index.nlevels)
-        else:
-            col_formats.append('l')  # Single index column
+    # For MultiIndex, reset index to avoid malformed headers
+    if has_multiindex_rows:
+        df_export = df.reset_index()
+        show_index_for_latex = False
+    else:
+        df_export = df.copy()
+        show_index_for_latex = show_index
+    
+    # Drop columns that are entirely empty/NaN
+    df_export = df_export.dropna(axis=1, how='all')
+    
+    # Dynamic column formatting with reduced padding
+    col_formats = ['@{}']  # Remove left padding
+    
+    if show_index_for_latex:
+        col_formats.append('l')
     
     # Format data columns
-    for col in df.columns:
-        if pd.api.types.is_numeric_dtype(df[col]):
+    for col in df_export.columns:
+        if pd.api.types.is_numeric_dtype(df_export[col]):
             col_formats.append('r')
         else:
             col_formats.append('l')
     
+    col_formats.append('@{}')  # Remove right padding
     column_format = ''.join(col_formats)
     
     def safe_float_format(x):
@@ -198,20 +229,53 @@ def save_table(df, name, caption="", show_index=None, **kwargs):
         except:
             return str(x)
     
-    print(has_multiindex_rows)
-    latex_str = df.to_latex(
-        index=show_index,  # Now controlled by parameter
-        escape=False,
-        column_format=column_format,
-        multirow=has_multiindex_rows,
-        multicolumn=has_multiindex_cols,
-        longtable=True,
-        float_format=safe_float_format,
-        na_rep='',
-        caption=caption if caption else None,
-        position='htbp',
-        **kwargs
-    )
+    # Extract label from kwargs if provided
+    label = kwargs.pop('label', None)
+    
+    if longtable:
+        # Use longtable for multi-page tables
+        # Note: longtable uses [c], [l], [r] for alignment, not [htbp]
+        latex_str = df_export.to_latex(
+            index=show_index_for_latex,
+            escape=False,
+            column_format=column_format,
+            multirow=has_multiindex_rows,
+            multicolumn=has_multiindex_cols,
+            longtable=True,
+            float_format=safe_float_format,
+            na_rep='',
+            caption=caption if caption else None,
+            position='c',  # Center alignment for longtable
+            label=label,
+            **kwargs
+        )
+    else:
+        # Use regular tabular wrapped in table environment
+        latex_str = df_export.to_latex(
+            index=show_index_for_latex,
+            escape=False,
+            column_format=column_format,
+            multirow=has_multiindex_rows,
+            multicolumn=has_multiindex_cols,
+            longtable=False,
+            float_format=safe_float_format,
+            na_rep='',
+            **kwargs
+        )
+        
+        # Wrap in table environment with caption and label
+        table_wrapper = "\\begin{table}[htbp]\n\\centering\n"
+        if caption:
+            table_wrapper += f"\\caption{{{caption}}}\n"
+        if label:
+            table_wrapper += f"\\label{{{label}}}\n"
+        table_wrapper += latex_str
+        table_wrapper += "\\end{table}\n"
+        latex_str = table_wrapper
+    
+    # Post-process to fix any remaining issues
+    # Remove any duplicate toprule/midrule at the start
+    latex_str = re.sub(r'(\\toprule\n)+', r'\\toprule\n', latex_str)
     
     with open(table_dir / f"{name}.tex", 'w', encoding='utf-8') as f:
         f.write(latex_str)
@@ -223,7 +287,10 @@ def save_table(df, name, caption="", show_index=None, **kwargs):
 
 # Load the experimental results
 output_dir = Path("processed_data")
-df = pd.read_csv(output_dir / "graph_symmetry_results_all.csv")
+df = pd.read_csv(output_dir / "graph_symmetry_results_brain.csv")
+
+# Preprocess: Rename GEO to GEO2D for consistency
+df['graph_type'] = df['graph_type'].replace({'GEO': 'GEO2D'})
 
 # Apply method name mapping
 df['method_display'] = df['method'].map(METHOD_NAMES)
@@ -322,7 +389,7 @@ iterative_methods = ["QSA", "Manifold", "InteriorPoint"]
 df_iterative = df[df["method"].isin(iterative_methods)].copy()
 
 # Ensure consistent ordering
-graph_types = ["ER", "BA", "LRM", "GEO", "GEO3D", "DD", "HK"]
+graph_types = ALL_GRAPH_TYPES
 method_order = ['QSA', 'MF', 'IP']
 ```
 
@@ -361,8 +428,8 @@ success_rates = (
 )
 
 # Create separate plots for each graph type
-# Standard graphs: ER, BA, GEO, GEO3D, DD, HK (no rewiring parameter)
-standard_graph_types = ["ER", "BA", "GEO", "GEO3D", "DD", "HK"]
+# Standard graphs: ER, BA, GEO2D, GEO3D, DD, HK (no rewiring parameter)
+standard_graph_types = STANDARD_GRAPH_TYPES
 for graph_type in standard_graph_types:
     data_subset = success_rates[success_rates["graph_type"] == graph_type]
     
@@ -648,8 +715,8 @@ best_symmetry = (
     .reset_index()
 )
 
-# Plot for standard graph types (ER, BA, GEO, GEO3D, DD, HK)
-standard_graph_types = ["ER", "BA", "GEO", "GEO3D", "DD", "HK"]
+# Plot for standard graph types (ER, BA, GEO2D, GEO3D, DD, HK)
+standard_graph_types = STANDARD_GRAPH_TYPES
 for graph_type in standard_graph_types:
     data_subset = best_symmetry[best_symmetry["graph_type"] == graph_type]
     
@@ -719,6 +786,69 @@ if not lrm_data.empty:
     
     save_figure(g.fig, "symmetry-vs-c-lrm")
     plt.show()
+```
+
+```{python}
+#| label: fig-symmetry-vs-c-unified
+#| fig-cap: "Unified view of symmetry coefficient as a function of penalty parameter $c$ for non-identity solutions. Each row corresponds to a graph type, columns show different network sizes, and line styles indicate edge densities. Lower values indicate better approximate symmetries. Error bars show 95% confidence intervals."
+#| fig-width: 14
+#| fig-height: 18
+
+# Prepare data for unified plot (standard graph types only)
+unified_symmetry_data = best_symmetry[best_symmetry["graph_type"].isin(standard_graph_types)].copy()
+
+# Ensure proper ordering of graph types
+unified_symmetry_data['graph_type'] = pd.Categorical(
+    unified_symmetry_data['graph_type'], 
+    categories=standard_graph_types, 
+    ordered=True
+)
+
+# Create the unified FacetGrid
+g = sns.relplot(
+    data=unified_symmetry_data,
+    x='c', 
+    y='symmetry', 
+    hue='method_display',
+    palette={METHOD_NAMES[m]: METHOD_COLORS[m] for m in ["QSA", "Manifold", "InteriorPoint"]},
+    style="density",
+    col="n_nodes", 
+    row="graph_type",
+    kind="line",
+    markers=True,
+    errorbar='ci',
+    height=2.5,
+    aspect=1.2,
+    facet_kws={'sharex': True, 'sharey': True}
+)
+
+# Customize legend labels
+for text in g._legend.get_texts():
+    if text.get_text() == 'method_display':
+        text.set_text('Method')
+    elif text.get_text() == 'density':
+        text.set_text('Density')
+
+# Move legend to the right side, vertically centered
+sns.move_legend(g, "center left", bbox_to_anchor=(1.02, 0.5), frameon=True)
+
+# Set axis labels and titles
+g.set_axis_labels("", "")  # Remove individual axis labels
+g.set_titles("{row_name} ($n={col_name}$)")
+
+# Add overall title
+g.fig.suptitle("Symmetry Quality Across Graph Types", y=1.00, weight='bold', fontsize=24)
+
+# Adjust layout for better spacing with room for common labels
+plt.tight_layout(rect=[0.05, 0.05, 0.98, 0.98])
+
+# Add common axis labels after tight_layout
+g.fig.text(0.5, 0.03, "Penalty parameter $c$", ha='center', fontsize=18)
+g.fig.text(0.03, 0.5, "Symmetry coefficient", va='center', rotation='vertical', fontsize=18)
+
+# Save and display
+save_figure(g.fig, "symmetry-vs-c-unified")
+plt.show()
 ```
 
 ```{python}
@@ -1024,7 +1154,7 @@ optimal_best = (
 )
 
 # Create comparison plots for standard graph types
-standard_graph_types = ["ER", "BA", "GEO", "GEO3D", "DD", "HK"]
+standard_graph_types = STANDARD_GRAPH_TYPES
 for graph_type in standard_graph_types:
     data_subset = optimal_best[optimal_best["graph_type"] == graph_type]
     
@@ -1338,7 +1468,7 @@ success_rates_temp = (
 #| fig-height: 10
 
 # Create separate plots for each graph type and method
-standard_graph_types = ["ER", "BA", "GEO", "GEO3D", "DD", "HK"]
+standard_graph_types = STANDARD_GRAPH_TYPES
 
 for method in ["DR", "OR"]:
     for graph_type in standard_graph_types:
@@ -1350,15 +1480,23 @@ for method in ["DR", "OR"]:
         if data_subset.empty:
             continue
         
+        # Use deep palette starting from the 6th color for densities
+        density_levels = sorted(data_subset['density'].unique())
+        density_colors = sns.color_palette("deep")[5:]
+        density_palette = {d: density_colors[i % len(density_colors)] for i, d in enumerate(density_levels)}
+
         g = sns.relplot(
             data=data_subset,
             x='c',
             y='success_rate',
             hue='density',
+            hue_order=density_levels,
+            palette=density_palette,
             style='method_initial_tau',
             col='n_nodes',
             kind='line',
             markers=True,
+            size=5,
             height=3,
             aspect=1.2,
             facet_kws={'sharex': True, 'sharey': True}
@@ -1393,11 +1531,18 @@ for method in ["DR", "OR"]:
     ]
     
     if not lrm_data.empty:
+        # Use deep palette starting from the 6th color for densities
+        density_levels_lrm = sorted(lrm_data['density'].unique())
+        density_colors_lrm = sns.color_palette("deep")[5:]
+        density_palette_lrm = {d: density_colors_lrm[i % len(density_colors_lrm)] for i, d in enumerate(density_levels_lrm)}
+
         g = sns.relplot(
             data=lrm_data,
             x='c',
             y='success_rate',
             hue='density',
+            hue_order=density_levels_lrm,
+            palette=density_palette_lrm,
             style='method_initial_tau',
             col='rew',
             row='n_nodes',
@@ -1405,7 +1550,7 @@ for method in ["DR", "OR"]:
             markers=True,
             height=3,
             aspect=1.0,
-            facet_kws={'sharex': True, 'sharey': True}
+            facet_kws={'sharex': True, 'sharey': True},
         )
         
         for text in g._legend.get_texts():
@@ -1413,6 +1558,10 @@ for method in ["DR", "OR"]:
                 text.set_text('Density')
             elif text.get_text() == 'method_initial_tau':
                 text.set_text(r'Temperature $\tau$')
+
+        # Set x-axis to log scale
+        for ax in g.axes.flat:
+            ax.set_xscale('log')
         
         g.set_axis_labels("Penalty parameter $c$", "Success rate")
         g.set_titles("$n={row_name}$, $k={col_name}$")
@@ -1557,7 +1706,7 @@ for method in ["DR", "OR"]:
         # Create subplot grid
         n_rows = len(densities)
         n_cols = len(n_nodes_vals)
-        fig, axes = plt.subplots(n_rows, n_cols, figsize=(4*n_cols, 3.5*n_rows), 
+        fig, axes = plt.subplots(n_rows, n_cols, figsize=(2*n_cols, 1.75*n_rows), 
                                  squeeze=False, constrained_layout=True)
         
         # Use global min/max for consistent colorbar across all figures
@@ -1661,7 +1810,7 @@ for method in ["DR", "OR"]:
         # Create subplot grid
         n_rows = len(densities)
         n_cols = len(rew_vals)
-        fig, axes = plt.subplots(n_rows, n_cols, figsize=(4*n_cols, 3.5*n_rows),
+        fig, axes = plt.subplots(n_rows, n_cols, figsize=(2.5*n_cols, 2*n_rows),
                                  squeeze=False, constrained_layout=True)
         
         # Use global min/max for consistent colorbar across all figures
@@ -1916,8 +2065,8 @@ for method in ["DR", "OR"]:
         n_rows = len(graph_types_present)
         n_cols = len(n_nodes_vals)
         
-        fig = plt.figure(figsize=(5*n_cols, 3.5*n_rows), constrained_layout=True)
-        gs = fig.add_gridspec(n_rows, n_cols, hspace=0.15, wspace=0.15)
+        fig = plt.figure(figsize=(2.5*n_cols, 1.75*n_rows), constrained_layout=True)
+        gs = fig.add_gridspec(n_rows, n_cols, hspace=0.10, wspace=0.10)
         
         # Use global min/max for consistent colorbar
         vmin = global_vmin
@@ -1988,7 +2137,7 @@ for method in ["DR", "OR"]:
             ax=axes,
             label='Mean Symmetry Coefficient',
             aspect=40,
-            pad=0.01,
+            pad=0.05,
             shrink=0.8
         )
         cbar.ax.tick_params(labelsize=10)
@@ -2335,7 +2484,7 @@ for graph_type in standard_graph_types:
         x='n_nodes',
         y='symmetry',
         hue='method_display',
-        palette={METHOD_NAMES[m]: METHOD_COLORS[m] for m in ["SoftSort", "OT4P4AS"]},
+        palette={METHOD_NAMES[m]: METHOD_COLORS[m] for m in ["DimensionalityReduction", "OrthogonalRelaxation"]},
         col='density',
         kind='box',
         showfliers=False,
@@ -2363,7 +2512,7 @@ if not lrm_optimal.empty:
         x='rew',
         y='symmetry',
         hue='method_display',
-        palette={METHOD_NAMES[m]: METHOD_COLORS[m] for m in ["SoftSort", "OT4P4AS"]},
+        palette={METHOD_NAMES[m]: METHOD_COLORS[m] for m in ["DimensionalityReduction", "OrthogonalRelaxation"]},
         col='n_nodes',
         row='density',
         kind='box',
@@ -2409,7 +2558,7 @@ if not unified_optimal.empty:
         x='n_nodes',
         y='symmetry',
         hue='method_display',
-        palette={METHOD_NAMES[m]: METHOD_COLORS[m] for m in ["SoftSort", "OT4P4AS"]},
+        palette={METHOD_NAMES[m]: METHOD_COLORS[m] for m in ["DimensionalityReduction", "OrthogonalRelaxation"]},
         row='graph_type',
         col='density',
         kind='box',
@@ -2862,7 +3011,7 @@ for method in ['DR', 'OR']:
 
 ```{python}
 #| label: fig-loss-comparison-heatmaps-standard
-#| fig-cap: "Heatmap visualization of statistical comparisons between convex and indefinite loss functions for standard graph types (ER, BA, GEO, GEO3D, DD, HK). Each panel shows p-values (left) and Cohen's D effect sizes (right) for different combinations of parameters. Rows represent different densities (ρ), columns represent different temperatures (τ). Within each cell, the heatmap shows penalty parameter (c) on y-axis and network size (n) on x-axis. Darker colors in p-value heatmaps indicate stronger statistical significance; in Cohen's D heatmaps, more negative values (blue) indicate convex superiority."
+#| fig-cap: "Heatmap visualization of statistical comparisons between convex and indefinite loss functions for standard graph types (ER, BA, GEO2D, GEO3D, DD, HK). Each panel shows p-values (left) and Cohen's D effect sizes (right) for different combinations of parameters. Rows represent different densities (ρ), columns represent different temperatures (τ). Within each cell, the heatmap shows penalty parameter (c) on y-axis and network size (n) on x-axis. Darker colors in p-value heatmaps indicate stronger statistical significance; in Cohen's D heatmaps, more negative values (blue) indicate convex superiority."
 #| fig-width: 18
 #| fig-height: 12
 #| code-summary: "Create comprehensive heatmap visualization for standard graph types"
@@ -3064,7 +3213,7 @@ def create_er_ba_loss_comparison_heatmap(data, method_name, graph_type, save_nam
     plt.show()
 
 # Create visualizations for standard graph types (excluding LRM which has different structure)
-standard_graph_types = ["ER", "BA", "GEO", "GEO3D", "DD", "HK"]
+standard_graph_types = STANDARD_GRAPH_TYPES
 for method in ['DR', 'OR']:
     for graph_type in standard_graph_types:
         # Skip if no data available for this graph type
@@ -3090,7 +3239,7 @@ This subsection produces distribution plots for iteration of best solution.
 non_anneal_data = df_temp[~df_temp['is_anneal']].copy()
 
 # Create iteration distribution plots for each method
-for method in ["SoftSort", "OT4P4AS"]:
+for method in ["DimensionalityReduction", "OrthogonalRelaxation"]:
     method_data = non_anneal_data[non_anneal_data['method'] == method]
     
     if not method_data.empty:
@@ -3210,7 +3359,7 @@ def create_loss_rew_palette(data, base_colors=None):
     return palette
 
 # Apply in your plotting loop
-for method in ["SoftSort", "OT4P4AS"]:
+for method in ["DimensionalityReduction", "OrthogonalRelaxation"]:
     method_data = temp_best[temp_best["method_display"] == METHOD_NAMES[method]]
     
     for graph_type in graph_types:
@@ -3335,7 +3484,7 @@ def create_loss_rew_palette(data, base_colors=None):
     return palette
 
 # Apply in your plotting loop
-for method in ["SoftSort", "OT4P4AS"]:
+for method in ["DimensionalityReduction", "OrthogonalRelaxation"]:
     method_data = temp_best[temp_best["method_display"] == METHOD_NAMES[method]]
     
     for graph_type in graph_types:
@@ -3387,11 +3536,11 @@ fixed temperature strategies against cosine annealing schedules.
 #| fig-height: 10
 
 # Select best fixed temperature configurations
-# Note: Correcting tau value for SoftSort based on earlier optimal configuration analysis
+# Note: Correcting tau value for DimensionalityReduction based on earlier optimal configuration analysis
 best_fixed = df_temp[
     (~df_temp['is_anneal']) & 
-    (((df_temp['method'] == 'SoftSort') & (df_temp['method_initial_tau'] == 0.1) & (df_temp['c'] == 0.1)) |
-     ((df_temp['method'] == 'OT4P4AS') & (df_temp['method_initial_tau'] == 0.7) & (df_temp['c'] == 0.1)))
+    (((df_temp['method'] == 'DimensionalityReduction') & (df_temp['method_initial_tau'] == 0.1) & (df_temp['c'] == 0.1)) |
+     ((df_temp['method'] == 'OrthogonalRelaxation') & (df_temp['method_initial_tau'] == 0.7) & (df_temp['c'] == 0.1)))
 ].copy()
 
 # Combine with annealing data
@@ -3418,14 +3567,14 @@ annealing_best['strategy'] = annealing_best.apply(
 )
 
 # Plot comparison for each method
-for method in ["SoftSort", "OT4P4AS"]:
+for method in ["DimensionalityReduction", "OrthogonalRelaxation"]:
     method_data = annealing_best[
         annealing_best["method_display"] == METHOD_NAMES[method]
     ]
     
     if not method_data.empty:
         # Separate standard graph types from LRM networks (LRM has rewiring parameter)
-        standard_types = ["ER", "BA", "GEO", "GEO3D", "DD", "HK"]
+        standard_types = STANDARD_GRAPH_TYPES
         er_ba_data = method_data[method_data["graph_type"].isin(standard_types)]
         lrm_data = method_data[method_data["graph_type"] == "LRM"]
         
@@ -3493,7 +3642,7 @@ Annealing comparison: Fixed vs scheduled temperature strategies summarized in bo
 
 # Calculate summary statistics for annealing comparison
 annealing_stats = []
-for method in ["SoftSort", "OT4P4AS"]:
+for method in ["DimensionalityReduction", "OrthogonalRelaxation"]:
     method_data = annealing_best[annealing_best["method_display"] == METHOD_NAMES[method]]
 
     groups = method_data.groupby(
@@ -3534,137 +3683,560 @@ Section intentionally omits synthetic summary; integrate insights externally by 
 Having analyzed iterative and temperature-based methods separately, we now
 present a unified comparison across all five methods.
 
+## Parameter Selection Infrastructure {#sec-parameter-infrastructure}
+
+This infrastructure provides flexible parameter selection with two modes:
+
+- **Global mode**: Parameters optimized across all graph types (strict, conservative)
+- **Per-graph-type mode**: Topology-specific parameters (allows per-topology tuning)
+
+The global mode finds parameters that work well everywhere, which may be suboptimal 
+for specific topologies. The per-graph-type mode allows each topology to use its 
+best parameters, which can reveal method performance without cross-topology constraints.
+
+```{python}
+#| label: parameter-selection-infrastructure
+#| code-summary: "Infrastructure for selecting optimal parameters globally or per-graph-type"
+
+def build_optimal_configs_per_graph_type(df, df_temp, success_by_sim, success_by_sim_temp):
+    """
+    Build optimal parameter configurations on a per-graph-type basis.
+    
+    For each graph type, finds optimal parameters that work well across all 
+    network sizes and densities within that specific topology. This allows
+    for topology-specific tuning rather than forcing global parameters.
+    
+    Parameters
+    ----------
+    df : pd.DataFrame
+        Main results dataframe for iterative methods
+    df_temp : pd.DataFrame
+        Results dataframe for temperature methods
+    success_by_sim : pd.DataFrame
+        Success rate data for iterative methods
+    success_by_sim_temp : pd.DataFrame
+        Success rate data for temperature methods
+        
+    Returns
+    -------
+    dict
+        Nested structure: {method: {graph_type: params}}
+    """
+    configs = {}
+    standard_graph_types = STANDARD_WITH_LRM
+    
+    # Process iterative methods
+    # Map between method names in df ('QSA', 'Manifold', 'InteriorPoint') 
+    # and display names in success_by_sim ('QSA', 'MF', 'IP')
+    method_mapping = {
+        'QSA': 'QSA',
+        'Manifold': 'MF', 
+        'InteriorPoint': 'IP'
+    }
+    
+    for method in ['QSA', 'Manifold', 'InteriorPoint']:
+        configs[method] = {}
+        method_display = method_mapping[method]
+        
+        for graph_type in standard_graph_types:
+            method_success = success_by_sim[
+                (success_by_sim['method_display'] == method_display) &
+                (success_by_sim['graph_type'] == graph_type)
+            ]
+            
+            method_symmetry = df[
+                (df['method'] == method) &
+                (df['graph_type'] == graph_type)
+            ]
+            
+            if method_success.empty or method_symmetry.empty:
+                continue
+            
+            # Find c values with perfect success rate for this graph type
+            c_metrics = (
+                method_success
+                .groupby('c')
+                .agg(
+                    success_rate=('success', 'mean'),
+                    total_sims=('success', 'count')
+                )
+                .reset_index()
+            )
+            
+            perfect_c = c_metrics[c_metrics['success_rate'] >= 0.99]['c'].values
+            
+            if len(perfect_c) == 0:
+                continue
+            
+            # Among perfect c values, find the one with best symmetry
+            best_c = None
+            best_symmetry = float('inf')
+            
+            for c_val in perfect_c:
+                c_sym = method_symmetry[method_symmetry['c'] == c_val]['symmetry']
+                if len(c_sym) > 0:
+                    mean_sym = c_sym.mean()
+                    if mean_sym < best_symmetry:
+                        best_symmetry = mean_sym
+                        best_c = c_val
+            
+            if best_c is not None:
+                configs[method][graph_type] = {'c': best_c}
+    
+    # Process temperature methods
+    for method in ['DimensionalityReduction', 'OrthogonalRelaxation']:
+        configs[method] = {}
+        method_display = "DR" if method == "DimensionalityReduction" else "OR"
+        
+        for graph_type in standard_graph_types:
+            method_success = success_by_sim_temp[
+                (success_by_sim_temp['method_display'] == method_display) &
+                (success_by_sim_temp['graph_type'] == graph_type)
+            ]
+            
+            method_symmetry = df_temp[
+                (df_temp['method'] == method) &
+                (df_temp['graph_type'] == graph_type)
+            ]
+            
+            if method_success.empty or method_symmetry.empty:
+                continue
+            
+            # Find (tau, c) combinations with perfect success rate
+            config_metrics = (
+                method_success
+                .groupby(['method_initial_tau', 'c'])
+                .agg(
+                    success_rate=('success', 'mean')
+                )
+                .reset_index()
+            )
+            
+            perfect_configs = config_metrics[config_metrics['success_rate'] >= 0.99]
+            
+            if perfect_configs.empty:
+                continue
+            
+            # Among perfect configs, find best symmetry
+            best_tau = None
+            best_c = None
+            best_symmetry = float('inf')
+            
+            for _, row in perfect_configs.iterrows():
+                tau_val = row['method_initial_tau']
+                c_val = row['c']
+                
+                config_sym = method_symmetry[
+                    (method_symmetry['method_initial_tau'] == tau_val) &
+                    (method_symmetry['c'] == c_val) &
+                    (method_symmetry['method_loss'] == 'convex') &
+                    (method_symmetry['method_final_tau'].isna())
+                ]['symmetry']
+                
+                if len(config_sym) > 0:
+                    mean_sym = config_sym.mean()
+                    if mean_sym < best_symmetry:
+                        best_symmetry = mean_sym
+                        best_tau = tau_val
+                        best_c = c_val
+            
+            if best_tau is not None and best_c is not None:
+                configs[method][graph_type] = {
+                    'method_initial_tau': best_tau,
+                    'c': best_c,
+                    'method_loss': 'convex'
+                }
+    
+    return configs
+
+
+def build_optimal_configs(mode, df=None, df_temp=None, success_by_sim=None, success_by_sim_temp=None, 
+                         optimal_c_df=None, optimal_temp_df=None):
+    """
+    Factory function to build optimal parameter configurations.
+    
+    Parameters
+    ----------
+    mode : str
+        'global' - Use globally optimal parameters from ranked voting
+        'per_graph_type' - Use graph-type-specific optimal parameters
+    df, df_temp : pd.DataFrame
+        Required for 'per_graph_type' mode
+    success_by_sim, success_by_sim_temp : pd.DataFrame
+        Required for 'per_graph_type' mode
+    optimal_c_df, optimal_temp_df : pd.DataFrame
+        Required for 'global' mode
+        
+    Returns
+    -------
+    dict
+        If mode='global': {method: params}
+        If mode='per_graph_type': {method: {graph_type: params}}
+    """
+    if mode == "global":
+        # Extract global optimal values from ranked voting DataFrames
+        qsa_optimal_c = optimal_c_df[optimal_c_df['Method'] == 'QSA']['Optimal c'].iloc[0]
+        manifold_optimal_c = optimal_c_df[optimal_c_df['Method'] == 'MF']['Optimal c'].iloc[0]
+        ip_optimal_c = optimal_c_df[optimal_c_df['Method'] == 'IP']['Optimal c'].iloc[0]
+        
+        dr_optimal_tau = optimal_temp_df[optimal_temp_df['Method'] == 'DR']['Optimal tau'].iloc[0]
+        dr_optimal_c = optimal_temp_df[optimal_temp_df['Method'] == 'DR']['Optimal c'].iloc[0]
+        
+        or_optimal_tau = optimal_temp_df[optimal_temp_df['Method'] == 'OR']['Optimal tau'].iloc[0]
+        or_optimal_c = optimal_temp_df[optimal_temp_df['Method'] == 'OR']['Optimal c'].iloc[0]
+        
+        return {
+            'QSA': {
+                'c': qsa_optimal_c
+            },
+            'Manifold': {
+                'c': manifold_optimal_c
+            },
+            'InteriorPoint': {
+                'c': ip_optimal_c
+            },
+            'DimensionalityReduction': {
+                'method_initial_tau': dr_optimal_tau,
+                'c': dr_optimal_c,
+                'method_loss': 'convex'
+            },
+            'OrthogonalRelaxation': {
+                'method_initial_tau': or_optimal_tau,
+                'c': or_optimal_c,
+                'method_loss': 'convex'
+            },
+        }
+    
+    elif mode == "per_graph_type":
+        return build_optimal_configs_per_graph_type(df, df_temp, success_by_sim, success_by_sim_temp)
+    
+    else:
+        raise ValueError(f"Unknown mode: {mode}. Use 'global' or 'per_graph_type'")
+
+
+def get_optimal_params(method, graph_type, configs, mode="global"):
+    """
+    Retrieve optimal parameters for a method and graph type.
+    
+    Parameters
+    ----------
+    method : str
+        Method name (e.g., 'QSA', 'DimensionalityReduction')
+    graph_type : str
+        Graph type (e.g., 'ER', 'BA', 'GEO2D')
+    configs : dict
+        Configuration dictionary from build_optimal_configs()
+    mode : str
+        'global' or 'per_graph_type'
+        
+    Returns
+    -------
+    dict or None
+        Parameter dictionary, or None if not found
+    """
+    if mode == "global":
+        return configs.get(method, None)
+    
+    elif mode == "per_graph_type":
+        method_configs = configs.get(method, {})
+        return method_configs.get(graph_type, None)
+    
+    else:
+        raise ValueError(f"Unknown mode: {mode}")
+```
+
 ## Method Comparison Across Graph Types {#sec-unified-comparison}
 
 ```{python}
 #| label: prepare-unified-data
-#| code-summary: "Prepare data for unified comparison using optimal configurations from ranked voting analysis"
+#| code-summary: "Prepare data for unified comparison using optimal configurations"
 
-# Extract optimal values from previous analyses for reference
-qsa_optimal_c = optimal_c_df[optimal_c_df['Method'] == 'QSA']['Optimal c'].iloc[0]
-manifold_optimal_c = optimal_c_df[optimal_c_df['Method'] == 'MF']['Optimal c'].iloc[0]
-ip_optimal_c = optimal_c_df[optimal_c_df['Method'] == 'IP']['Optimal c'].iloc[0]
+# ==============================================================================
+# PARAMETER SELECTION MODE
+# ==============================================================================
+# Choose 'global' for parameters optimized across all graph types
+# Choose 'per_graph_type' for topology-specific parameters
+PARAMETER_MODE = "per_graph_type"
+# ==============================================================================
 
-dr_optimal_tau = optimal_temp_df[optimal_temp_df['Method'] == 'DR']['Optimal tau'].iloc[0]
-dr_optimal_c = optimal_temp_df[optimal_temp_df['Method'] == 'DR']['Optimal c'].iloc[0]
-
-or_optimal_tau = optimal_temp_df[optimal_temp_df['Method'] == 'OR']['Optimal tau'].iloc[0]
-or_optimal_c = 0.1#optimal_temp_df[optimal_temp_df['Method'] == 'OR']['Optimal c'].iloc[0]
-
-# Define optimal configurations for each method
-# Values loaded from ranked voting analyses (can be manually overridden if needed)
-optimal_configs = {
-    'QSA': {
-        'c': qsa_optimal_c
-    },
-    'Manifold': {
-        'c': manifold_optimal_c
-    },
-    'InteriorPoint': {
-        'c': ip_optimal_c
-    },
-    'DimensionalityReduction': {
-        'method_initial_tau': dr_optimal_tau,
-        'c': dr_optimal_c,
-        'method_loss': 'convex'
-    },
-    'OrthogonalRelaxation': {
-        'method_initial_tau': or_optimal_tau,
-        'c': or_optimal_c,
-        'method_loss': 'convex'
-    },
-}
-
-print("Optimal configurations loaded from ranked voting analysis:")
-for method, config in optimal_configs.items():
-    print(f"  {METHOD_NAMES.get(method, method)}: {config}")
+# Build optimal configurations based on selected mode
+if PARAMETER_MODE == "global":
+    optimal_configs = build_optimal_configs(
+        mode="global",
+        optimal_c_df=optimal_c_df,
+        optimal_temp_df=optimal_temp_df
+    )
+    print(f"Using GLOBAL optimal parameters (optimized across all graph types):")
+    print("="*80)
+    for method, config in optimal_configs.items():
+        print(f"  {METHOD_NAMES.get(method, method)}: {config}")
+    
+elif PARAMETER_MODE == "per_graph_type":
+    optimal_configs = build_optimal_configs(
+        mode="per_graph_type",
+        df=df,
+        df_temp=df_temp,
+        success_by_sim=success_by_sim,
+        success_by_sim_temp=success_by_sim_temp
+    )
+    print(f"Using PER-GRAPH-TYPE optimal parameters (topology-specific tuning):")
+    print("="*80)
+    for method, graph_configs in optimal_configs.items():
+        print(f"\n{METHOD_NAMES.get(method, method)}:")
+        for graph_type, config in graph_configs.items():
+            print(f"  {graph_type}: {config}")
 
 # Filter data for optimal configurations
 unified_data = []
 
-# Process iterative methods
-for method in ['QSA', 'Manifold', 'InteriorPoint']:
-    method_df = df[
-        (df['method'] == method) & 
-        (df['c'] == optimal_configs[method]['c'])
-    ].copy()
-    method_df['config'] = f"c={optimal_configs[method]['c']}"
-    unified_data.append(method_df)
+if PARAMETER_MODE == "global":
+    # Global mode: use same parameters for all graph types
+    for method in ['QSA', 'Manifold', 'InteriorPoint']:
+        params = get_optimal_params(method, None, optimal_configs, mode=PARAMETER_MODE)
+        if params is None:
+            continue
+        
+        method_df = df[
+            (df['method'] == method) & 
+            (df['c'] == params['c'])
+        ].copy()
+        method_df['config'] = f"c={params['c']}"
+        unified_data.append(method_df)
+    
+    for method in ['DimensionalityReduction', 'OrthogonalRelaxation']:
+        params = get_optimal_params(method, None, optimal_configs, mode=PARAMETER_MODE)
+        if params is None:
+            continue
+        
+        method_df = df[
+            (df['method'] == method) & 
+            (df['method_initial_tau'] == params['method_initial_tau']) &
+            (df['method_loss'] == params['method_loss']) &
+            (df['c'] == params['c']) &
+            (df['method_final_tau'].isna())
+        ].copy()
+        method_df['config'] = f"tau={params['method_initial_tau']}, {params['method_loss']}"
+        unified_data.append(method_df)
 
-# Process temperature methods
-for method in ['DimensionalityReduction', 'OrthogonalRelaxation']:
-    method_df = df[
-        (df['method'] == method) & 
-        (df['method_initial_tau'] == optimal_configs[method]['method_initial_tau']) &
-        (df['method_loss'] == optimal_configs[method]['method_loss']) &
-        (df['c'] == optimal_configs[method]['c']) &
-        (df['method_final_tau'].isna())
-    ].copy()
-    method_df['config'] = f"τ={optimal_configs[method]['method_initial_tau']}, {optimal_configs[method]['method_loss']}"
-    unified_data.append(method_df)
+elif PARAMETER_MODE == "per_graph_type":
+    # Per-graph-type mode: use different parameters for each topology
+    standard_graph_types = STANDARD_WITH_LRM
+    
+    for method in ['QSA', 'Manifold', 'InteriorPoint']:
+        for graph_type in standard_graph_types:
+            params = get_optimal_params(method, graph_type, optimal_configs, mode=PARAMETER_MODE)
+            if params is None:
+                continue
+            
+            method_df = df[
+                (df['method'] == method) &
+                (df['graph_type'] == graph_type) &
+                (df['c'] == params['c'])
+            ].copy()
+            method_df['config'] = f"{graph_type}: c={params['c']}"
+            unified_data.append(method_df)
+    
+    for method in ['DimensionalityReduction', 'OrthogonalRelaxation']:
+        for graph_type in standard_graph_types:
+            params = get_optimal_params(method, graph_type, optimal_configs, mode=PARAMETER_MODE)
+            if params is None:
+                continue
+            
+            method_df = df[
+                (df['method'] == method) &
+                (df['graph_type'] == graph_type) &
+                (df['method_initial_tau'] == params['method_initial_tau']) &
+                (df['method_loss'] == params['method_loss']) &
+                (df['c'] == params['c']) &
+                (df['method_final_tau'].isna())
+            ].copy()
+            method_df['config'] = f"{graph_type}: tau={params['method_initial_tau']}, {params['method_loss']}"
+            unified_data.append(method_df)
 
 # Combine all data
-unified_df = pd.concat(unified_data, ignore_index=True)
-unified_df['method_display'] = unified_df['method'].map(METHOD_NAMES)
+if unified_data:
+    unified_df = pd.concat(unified_data, ignore_index=True)
+    unified_df['method_display'] = unified_df['method'].map(METHOD_NAMES)
+    
+    # Filter non-identity solutions
+    unified_df = unified_df[unified_df["n_nodes"] != unified_df["fixed_points"]]
+    
+    # Get best result per simulation
+    unified_best = (
+        unified_df
+        .groupby(["method_display", "graph_type", "n_nodes", "density", "rew", "sim_id"], dropna=False)["symmetry"]
+        .min()
+        .reset_index()
+    )
+else:
+    print("Warning: No data found for selected parameter mode")
+    unified_df = pd.DataFrame()
+    unified_best = pd.DataFrame()
+```
 
-# Filter non-identity solutions
-unified_df = unified_df[unified_df["n_nodes"] != unified_df["fixed_points"]]
+```{python}
+#| label: tbl-optimal-parameters-global
+#| tbl-cap: "Global optimal parameters for all methods selected using ranked voting across all graph topologies."
 
-# Get best result per simulation
-unified_best = (
-    unified_df
-    .groupby(["method_display", "graph_type", "n_nodes", "density", "rew", "sim_id"], dropna=False)["symmetry"]
-    .min()
-    .reset_index()
+# Build global optimal parameters table
+global_configs = build_optimal_configs(
+    mode="global",
+    optimal_c_df=optimal_c_df,
+    optimal_temp_df=optimal_temp_df
+)
+
+global_params = []
+
+# Add iterative methods (QSA, MF, IP)
+for method in ['QSA', 'Manifold', 'InteriorPoint']:
+    if method in global_configs:
+        params = global_configs[method]
+        global_params.append({
+            'Method': METHOD_NAMES[method],
+            'c': params['c'],
+            'tau': None,
+            'Loss': None
+        })
+
+# Add temperature methods (DR, OR)
+for method in ['DimensionalityReduction', 'OrthogonalRelaxation']:
+    if method in global_configs:
+        params = global_configs[method]
+        global_params.append({
+            'Method': METHOD_NAMES[method],
+            'c': params['c'],
+            'tau': params['method_initial_tau'],
+            'Loss': params['method_loss']
+        })
+
+global_params_df = pd.DataFrame(global_params)
+column_order = ['Method', 'c', 'tau', 'Loss']
+global_params_df = global_params_df[column_order]
+
+print("Global Optimal Parameters (used across all graph types):")
+print("="*80)
+print(global_params_df.to_markdown(index=False, floatfmt=".4f"))
+
+save_table(
+    global_params_df,
+    "optimal_parameters_global",
+    "Global optimal parameters for all methods (ranked voting across all topologies)",
+    label="tab:optimal-parameters-global"
 )
 ```
 
 ```{python}
-#| label: tbl-optimal-parameters-combined
-#| tbl-cap: "Combined optimal parameters for all methods selected using ranked voting across graph topologies."
+#| label: tbl-optimal-parameters-per-graph-type
+#| tbl-cap: "Per-graph-type optimal parameters for all methods, allowing topology-specific tuning."
 
-# Combine optimal parameters from iterative and temperature methods
-combined_params = []
-
-# Add iterative methods (QSA, MF, IP)
-for _, row in optimal_c_df.iterrows():
-    combined_params.append({
-        'Method': row['Method'],
-        'c': row['Optimal c'],
-        'tau': None,
-        'Loss': None,
-        'Selection': row['Selection'] if 'Selection' in row else None,
-        'Success Rate': row.get('Success Rate', None),
-        'Mean Symmetry': row.get('Mean Symmetry', None)
-    })
-
-# Add temperature methods (DR, OR)
-for _, row in optimal_temp_df.iterrows():
-    combined_params.append({
-        'Method': row['Method'],
-        'c': row['Optimal c'],
-        'tau': row['Optimal tau'],
-        'Loss': 'convex',  # Both use convex loss in optimal config
-        'Selection': row['Selection'],
-        'Success Rate': row.get('Success Rate', None),
-        'Mean Symmetry': row.get('Mean Symmetry', None)
-    })
-
-combined_params_df = pd.DataFrame(combined_params)
-
-# Reorder columns for clarity
-column_order = ['Method', 'c', 'tau', 'Loss', 'Selection', 'Success Rate', 'Mean Symmetry']
-combined_params_df = combined_params_df[column_order]
-
-print(combined_params_df.to_markdown(index=False, floatfmt=".4f"))
-
-# Save combined table
-save_table(
-    combined_params_df,
-    "optimal_parameters_combined",
-    "Combined optimal parameters for all methods (ranked voting)",
-    label="tab:optimal-parameters-combined"
+# Build per-graph-type optimal parameters
+per_graph_configs = build_optimal_configs(
+    mode="per_graph_type",
+    df=df,
+    df_temp=df_temp,
+    success_by_sim=success_by_sim,
+    success_by_sim_temp=success_by_sim_temp
 )
+
+# Create comprehensive table with all method-graph_type combinations
+per_graph_params = []
+standard_graph_types = STANDARD_WITH_LRM
+
+# Add iterative methods
+for method in ['QSA', 'Manifold', 'InteriorPoint']:
+    method_display = METHOD_NAMES[method]
+    if method in per_graph_configs:
+        for graph_type in standard_graph_types:
+            if graph_type in per_graph_configs[method]:
+                params = per_graph_configs[method][graph_type]
+                per_graph_params.append({
+                    'Method': method_display,
+                    'Graph Type': graph_type,
+                    'c': params['c'],
+                    'tau': None,
+                    'Loss': None
+                })
+            else:
+                # Mark missing configurations
+                per_graph_params.append({
+                    'Method': method_display,
+                    'Graph Type': graph_type,
+                    'c': None,
+                    'tau': None,
+                    'Loss': None
+                })
+
+# Add temperature methods
+for method in ['DimensionalityReduction', 'OrthogonalRelaxation']:
+    method_display = METHOD_NAMES[method]
+    if method in per_graph_configs:
+        for graph_type in standard_graph_types:
+            if graph_type in per_graph_configs[method]:
+                params = per_graph_configs[method][graph_type]
+                per_graph_params.append({
+                    'Method': method_display,
+                    'Graph Type': graph_type,
+                    'c': params['c'],
+                    'tau': params['method_initial_tau'],
+                    'Loss': params['method_loss']
+                })
+            else:
+                # Mark missing configurations
+                per_graph_params.append({
+                    'Method': method_display,
+                    'Graph Type': graph_type,
+                    'c': None,
+                    'tau': None,
+                    'Loss': None
+                })
+
+per_graph_params_df = pd.DataFrame(per_graph_params)
+column_order = ['Method', 'Graph Type', 'c', 'tau', 'Loss']
+per_graph_params_df = per_graph_params_df[column_order]
+
+print("\nPer-Graph-Type Optimal Parameters (topology-specific tuning):")
+print("="*80)
+print(per_graph_params_df.to_markdown(index=False, floatfmt=".4f"))
+
+# Split into iterative methods (QSA, MF, IP) and temperature methods (DR, OR)
+iterative_methods = ['QSA', 'MF', 'IP']
+temperature_methods = ['DR', 'OR']
+
+# Iterative methods table (c only, no tau)
+iterative_params_df = per_graph_params_df[
+    per_graph_params_df['Method'].isin(iterative_methods)
+][['Method', 'Graph Type', 'c', 'Loss']].copy()
+iterative_params_df_indexed = iterative_params_df.set_index(['Method', 'Graph Type'])
+
+save_table(
+    iterative_params_df_indexed,
+    "optimal_parameters_per_graph_type_iterative",
+    "Per-graph-type optimal parameters for iterative methods (QSA, MF, IP)",
+    label="tab:optimal-parameters-per-graph-type-iterative",
+)
+
+# Temperature methods table (c and tau)
+temperature_params_df = per_graph_params_df[
+    per_graph_params_df['Method'].isin(temperature_methods)
+][['Method', 'Graph Type', 'c', 'tau']].copy()
+temperature_params_df_indexed = temperature_params_df.set_index(['Method', 'Graph Type'])
+
+save_table(
+    temperature_params_df_indexed,
+    "optimal_parameters_per_graph_type_temperature",
+    "Per-graph-type optimal parameters for temperature methods (DR, OR)",
+    label="tab:optimal-parameters-per-graph-type-temperature",
+)
+
+# Summary statistics
+print("\n" + "="*80)
+print("Summary:")
+print("="*80)
+for method in ['QSA', 'MF', 'IP', 'DR', 'OR']:
+    method_data = per_graph_params_df[per_graph_params_df['Method'] == method]
+    total = len(method_data)
+    available = method_data['c'].notna().sum()
+    print(f"{method}: {available}/{total} graph types have optimal parameters")
 ```
 
 Unified comparison: Cross‑method boxplots under each method's selected configuration allow visual assessment of relative symmetry distributions. Use consistent ordering to quickly contrast medians and dispersion across methods.
@@ -3747,7 +4319,7 @@ for graph_type in graph_types:
 #| fig-height: 10
 
 # Create unified plot combining all standard graph types
-standard_graph_types = [gt for gt in ['ER', 'BA', 'GEO', 'GEO3D', 'DD', 'HK'] if gt in unified_best['graph_type'].values]
+standard_graph_types = [gt for gt in STANDARD_GRAPH_TYPES if gt in unified_best['graph_type'].values]
 
 unified_standard = unified_best[unified_best['graph_type'].isin(standard_graph_types)].copy()
 
@@ -3853,7 +4425,7 @@ save_table(
 time_data = unified_df.copy()
 
 # Separate standard graph types from LRM due to different parameter structure
-standard_types = ['ER', 'BA', 'GEO', 'GEO3D', 'DD', 'HK']
+standard_types = STANDARD_GRAPH_TYPES
 er_ba_time = time_data[time_data['graph_type'].isin(standard_types)]
 lrm_time = time_data[time_data['graph_type'] == 'LRM']
 
@@ -3871,6 +4443,7 @@ if not er_ba_time.empty:
         kind="point",
         #showfliers=False,
         height=3,
+        aspect=2,
         legend_out=True
     )
     g._legend.set_title("Method")
@@ -3904,6 +4477,7 @@ if not lrm_time.empty:
         kind="point",
         #showfliers=False,
         height=3,
+        aspect=2,
         legend_out=True,
         sharex=True,
         sharey=True
@@ -3927,12 +4501,15 @@ if not lrm_time.empty:
 
 ```{python}
 #| label: tbl-computational-time
-#| tbl-cap: "Summary of computational time requirements for all optimization methods. Times are reported in seconds across all experimental runs using optimal parameter configurations. The 'Time Ratio vs QSA' column shows the relative computational cost of each method compared to the baseline QSA method (ratio > 1 indicates slower than QSA). Statistics are computed across all graph types, network sizes, and parameter combinations."
+#| tbl-cap: "Summary of computational time requirements for all optimization methods for networks with n=100 nodes. Times are reported in seconds across all experimental runs using optimal parameter configurations. The 'Time Ratio vs QSA' column shows the relative computational cost of each method compared to the baseline QSA method (ratio > 1 indicates slower than QSA). Statistics are computed across all graph types with n=100."
+
+# Filter for n=100 only
+time_data_100 = time_data[time_data["n_nodes"] == 100]
 
 # Create summary statistics table
 time_summary = []
 for method in METHOD_NAMES.values():
-    method_times = time_data[time_data["method_display"] == method]["metric_time"]
+    method_times = time_data_100[time_data_100["method_display"] == method]["metric_time"]
 
     if not method_times.empty:
         time_summary.append(
@@ -3941,7 +4518,7 @@ for method in METHOD_NAMES.values():
                 "Median Time (s)": method_times.median(),
                 "Mean Time (s)": method_times.mean(),
                 "Time Ratio vs QSA": method_times.median()
-                / time_data[time_data["method_display"] == "QSA"][
+                / time_data_100[time_data_100["method_display"] == "QSA"][
                     "metric_time"
                 ].median(),
             }
@@ -3952,7 +4529,7 @@ print(time_summary_df.to_markdown(index=False, floatfmt=".2f"))
 save_table(
     time_summary_df,
     "computational_time",
-    "Summary of computational time requirements for all optimization methods. Times are reported in seconds across all experimental runs using optimal parameter configurations. The 'Time Ratio vs QSA' column shows the relative computational cost of each method compared to the baseline QSA method (ratio > 1 indicates slower than QSA). Statistics are computed across all graph types, network sizes, and parameter combinations.",
+    "Summary of computational time requirements for all optimization methods for networks with $n=100$ nodes. Times are reported in seconds across all experimental runs using optimal parameter configurations. The 'Time Ratio vs QSA' column shows the relative computational cost of each method compared to the baseline QSA method (ratio > 1 indicates slower than QSA). Statistics are computed across all graph types with $n=100$.",
     label="tab:computational-time",
 )
 ```
@@ -4067,7 +4644,7 @@ def perform_pairwise_ttests(data, graph_type, alpha=0.05):
 
 # Perform tests for each graph type
 pairwise_results = {}
-graph_types = ['ER', 'BA', 'LRM', 'GEO', 'GEO3D', 'DD', 'HK']
+graph_types = ALL_GRAPH_TYPES
 
 # Store pairwise results for later use in stratified analysis
 pairwise_results = {}
@@ -4342,8 +4919,8 @@ def create_cd_diagram(ax, data, title):
         'QSA': METHOD_COLORS['QSA'],
         'IP': METHOD_COLORS['InteriorPoint'],
         'MF': METHOD_COLORS['Manifold'],
-        'OR': METHOD_COLORS['OT4P4AS'],
-        'DR': METHOD_COLORS['SoftSort']
+        'OR': METHOD_COLORS['OrthogonalRelaxation'],
+        'DR': METHOD_COLORS['DimensionalityReduction']
     }
     
     # Pivot data for Friedman test
@@ -4406,7 +4983,7 @@ def create_cd_diagram(ax, data, title):
 
 ```{python}
 #| label: fig-stratified-standard-pvalues
-#| fig-cap: "P-value heatmaps from pairwise t-tests stratified by network size and density for standard graph types (ER, BA, GEO, GEO3D, DD, HK). Each row represents a different network size (n), each column represents a different density (ρ). Darker colors and asterisks indicate stronger statistical significance."
+#| fig-cap: "P-value heatmaps from pairwise t-tests stratified by network size and density for standard graph types (ER, BA, GEO2D, GEO3D, DD, HK). Each row represents a different network size (n), each column represents a different density (ρ). Darker colors and asterisks indicate stronger statistical significance."
 #| fig-width: 16
 #| fig-height: 14
 #| code-summary: "Create stratified p-value heatmaps for ER/BA networks"
@@ -4488,7 +5065,7 @@ def create_stratified_pvalue_heatmaps_er_ba(data, graph_type, save_name):
 
 
 # Create visualizations for standard graph types (excluding LRM which has different structure)
-standard_graph_types = ["ER", "BA", "GEO", "GEO3D", "DD", "HK"]
+standard_graph_types = STANDARD_GRAPH_TYPES
 for graph_type in standard_graph_types:
     # Skip if no data available for this graph type
     graph_subset = stat_data[stat_data['graph_type'] == graph_type]
@@ -4499,7 +5076,7 @@ for graph_type in standard_graph_types:
 
 ```{python}
 #| label: fig-stratified-standard-cohens-d
-#| fig-cap: "Cohen's D effect size heatmaps stratified by network size and density for standard graph types (ER, BA, GEO, GEO3D, DD, HK). Each row represents a different network size (n), each column represents a different density (ρ). Blue indicates row method outperforms column method."
+#| fig-cap: "Cohen's D effect size heatmaps stratified by network size and density for standard graph types (ER, BA, GEO2D, GEO3D, DD, HK). Each row represents a different network size (n), each column represents a different density (ρ). Blue indicates row method outperforms column method."
 #| fig-width: 16
 #| fig-height: 14
 #| code-summary: "Create stratified Cohen's D heatmaps for ER/BA networks"
@@ -4582,7 +5159,7 @@ for graph_type in standard_graph_types:
 
 ```{python}
 #| label: fig-stratified-standard-cd
-#| fig-cap: "Critical difference diagrams stratified by network size and density for standard graph types (ER, BA, GEO, GEO3D, DD, HK). Each subplot shows the performance ranking for a specific network size and density combination. Groups connected by horizontal bars are not significantly different."
+#| fig-cap: "Critical difference diagrams stratified by network size and density for standard graph types (ER, BA, GEO2D, GEO3D, DD, HK). Each subplot shows the performance ranking for a specific network size and density combination. Groups connected by horizontal bars are not significantly different."
 #| fig-width: 16
 #| fig-height: 14
 #| code-summary: "Create stratified critical difference diagrams for ER/BA networks"
@@ -4759,6 +5336,214 @@ for graph_type in standard_graph_types:
     if graph_subset.empty:
         continue
     create_stratified_sign_plots_standard(stat_data, graph_type, 'statistical-stratified')
+```
+
+```{python}
+#| label: fig-stratified-standard-mann-whitney
+#| fig-cap: "Mann-Whitney U test significance heatmaps stratified by network size and density for standard graph types (ER, BA, GEO2D, GEO3D, DD, HK). Each row represents a different network size (n), each column represents a different density (rho). Color intensity indicates significance level."
+#| fig-width: 16
+#| fig-height: 14
+#| code-summary: "Create stratified Mann-Whitney U test heatmaps for standard graph types"
+
+from matplotlib.colors import ListedColormap
+from mpl_toolkits.axes_grid1 import make_axes_locatable
+
+def calculate_pairwise_mann_whitney(data, methods):
+    """
+    Calculate pairwise Mann-Whitney U test p-values.
+    
+    Parameters
+    ----------
+    data : pd.DataFrame
+        Data with columns: instance_id, method_display, symmetry
+    methods : list
+        List of method names to compare
+        
+    Returns
+    -------
+    pd.DataFrame
+        Matrix of p-values
+    """
+    n_methods = len(methods)
+    p_values = pd.DataFrame(index=methods, columns=methods, dtype=float)
+    
+    for m1 in methods:
+        for m2 in methods:
+            if m1 == m2:
+                p_values.at[m1, m2] = np.nan
+                continue
+            
+            d1 = data[data['method_display'] == m1]['symmetry']
+            d2 = data[data['method_display'] == m2]['symmetry']
+            
+            if len(d1) < 2 or len(d2) < 2:
+                p_values.at[m1, m2] = np.nan
+                continue
+            
+            # Mann-Whitney U test
+            u_stat, p_val = stats.mannwhitneyu(d1, d2, alternative='two-sided')
+            p_values.at[m1, m2] = p_val
+            
+    return p_values
+
+def plot_mann_whitney_heatmap(ax, p_values, title):
+    """
+    Plot Mann-Whitney U test p-values as categorical significance heatmap.
+    
+    Parameters
+    ----------
+    ax : matplotlib.axes.Axes
+        Axes to plot on
+    p_values : pd.DataFrame
+        Matrix of p-values
+    title : str
+        Title for the subplot
+        
+    Returns
+    -------
+    matplotlib.collections.QuadMesh
+        The heatmap object
+    """
+    # Generate cubehelix colors for different significance levels
+    cubehelix_colors = sns.cubehelix_palette(n_colors=5, start=0.5, rot=-0.75, light=0.85, dark=0.15)
+    cmap_list = [
+        "1",  # diagonal (white)
+        cubehelix_colors[0].hex() if hasattr(cubehelix_colors[0], 'hex') else '#fbd7d4',  # non-significant
+        cubehelix_colors[4].hex() if hasattr(cubehelix_colors[4], 'hex') else '#005a32',  # p < 0.001
+        cubehelix_colors[3].hex() if hasattr(cubehelix_colors[3], 'hex') else '#238b45',  # p < 0.01
+        cubehelix_colors[2].hex() if hasattr(cubehelix_colors[2], 'hex') else '#a1d99b',  # p < 0.05
+    ]
+    
+    # Transform p-values to categorical bins
+    p_values_cat = p_values.copy()
+    xc = p_values.values.copy()
+    p_values_cat[(xc < 0.001) & (xc >= 0)] = 1
+    p_values_cat[(xc < 0.01) & (xc >= 0.001)] = 2
+    p_values_cat[(xc < 0.05) & (xc >= 0.01)] = 3
+    p_values_cat[(xc >= 0.05)] = 0
+    np.fill_diagonal(p_values_cat.values, -1)
+    
+    # Create the heatmap without colorbar
+    heatmap = sns.heatmap(
+        p_values_cat,
+        cmap=ListedColormap(cmap_list),
+        vmin=-1,
+        vmax=3,
+        center=1,
+        cbar=False,
+        ax=ax,
+        linewidths=0.5,
+        linecolor='0',
+        clip_on=False,
+        square=True
+    )
+    
+    ax.set_title(title, fontsize=11, weight='bold')
+    ax.set_xlabel('')
+    ax.set_ylabel('')
+    
+    return heatmap
+
+def create_stratified_mann_whitney_heatmaps(data, graph_type, save_name):
+    """
+    Create Mann-Whitney U test heatmaps stratified by network size and density.
+    
+    Parameters
+    ----------
+    data : pd.DataFrame
+        Statistical data
+    graph_type : str
+        Graph type to analyze
+    save_name : str
+        Base name for saving figure
+    """
+    methods = ['QSA', 'IP', 'MF', 'OR', 'DR']
+    
+    # Filter for graph type
+    subset = data[data['graph_type'] == graph_type].copy()
+    
+    # Get unique sizes and densities
+    sizes = sorted(subset['n_nodes'].unique())
+    densities = sorted(subset['density'].unique())
+    
+    n_rows = len(sizes)
+    n_cols = len(densities)
+    
+    # Create figure
+    fig, axes = plt.subplots(n_rows, n_cols, figsize=(4.5 * n_cols, 4 * n_rows),
+                            squeeze=False, layout='constrained')
+    
+    # Track for shared colorbar
+    heatmap_obj = None
+    
+    for size_idx, size in enumerate(sizes):
+        for dens_idx, density in enumerate(densities):
+            ax = axes[size_idx, dens_idx]
+            
+            # Filter data
+            cell_data = subset[
+                (subset['n_nodes'] == size) &
+                (subset['density'] == density)
+            ]
+            
+            if len(cell_data) < 10:  # Minimum samples
+                ax.text(0.5, 0.5, 'Insufficient\ndata',
+                       ha='center', va='center', transform=ax.transAxes)
+                ax.set_title(f'$n={size}$, $\\rho={density}$', fontsize=11, weight='bold')
+                ax.axis('off')
+                continue
+            
+            # Compute Mann-Whitney p-values
+            p_values = calculate_pairwise_mann_whitney(cell_data, methods)
+            
+            # Plot
+            heatmap = plot_mann_whitney_heatmap(ax, p_values, f'$n={size}$, $\\rho={density}$')
+            if heatmap_obj is None:
+                heatmap_obj = heatmap
+            
+            # Only show y-labels on leftmost column
+            if dens_idx > 0:
+                ax.set_yticklabels([])
+    
+    # Add overall title
+    fig.suptitle(
+        f'Pairwise Mann-Whitney U Test: {graph_type} Networks\n'
+        f'(Stratified by Network Size and Density)',
+        fontsize=16, weight='bold'
+    )
+    
+    # Add shared colorbar with proper labels
+    if heatmap_obj is not None:
+        # Create colorbar axis
+        cbar = fig.colorbar(
+            heatmap_obj.collections[0],
+            ax=axes,
+            orientation='vertical',
+            fraction=0.02,
+            pad=0.02,
+            aspect=30,
+            ticks=[0, 1, 2, 3],
+            boundaries=[-0.5, 0.5, 1.5, 2.5, 3.5]
+        )
+        
+        # Customize the colorbar to show significance levels
+        cbar.set_label('Significance', fontsize=12)
+        cbar.set_ticklabels([r'$p \geq 0.05$', r'$p < 0.001$', r'$p < 0.01$', r'$p < 0.05$'])
+        cbar.outline.set_linewidth(1)
+        cbar.outline.set_edgecolor('0.5')
+        cbar.ax.tick_params(size=0)
+    
+    save_figure(fig, f'{save_name}-{graph_type.lower()}-mann-whitney')
+    plt.show()
+
+
+# Create visualizations for standard graph types
+for graph_type in standard_graph_types:
+    # Skip if no data available for this graph type
+    graph_subset = stat_data[stat_data['graph_type'] == graph_type]
+    if graph_subset.empty:
+        continue
+    create_stratified_mann_whitney_heatmaps(stat_data, graph_type, 'statistical-stratified')
 ```
 
 ### Stratification by Network Size, Density, and Rewiring (LRM Networks)
@@ -5096,6 +5881,102 @@ def create_stratified_sign_plots_lrm(data, save_name, n_nodes=100):
 create_stratified_sign_plots_lrm(stat_data, 'statistical-stratified')
 ```
 
+```{python}
+#| label: fig-stratified-lrm-mann-whitney
+#| fig-cap: "Mann-Whitney U test significance heatmaps stratified by rewiring level and density for LRM networks. Each row represents a different rewiring level (k), each column represents a different density (rho). Color intensity indicates significance level. Network size n=100 only."
+#| fig-width: 16
+#| fig-height: 12
+#| code-summary: "Create stratified Mann-Whitney U test heatmaps for LRM networks"
+
+def create_stratified_mann_whitney_heatmaps_lrm(data, save_name, n_nodes=100):
+    """
+    Create Mann-Whitney U test heatmaps for LRM networks stratified by rewiring and density.
+    
+    Parameters
+    ----------
+    data : pd.DataFrame
+        Statistical data
+    save_name : str
+        Base name for saving figure
+    n_nodes : int
+        Network size to analyze (default: 100)
+    """
+    methods = ['QSA', 'IP', 'MF', 'OR', 'DR']
+    
+    subset = data[
+        (data['graph_type'] == 'LRM') &
+        (data['n_nodes'] == n_nodes)
+    ].copy()
+    
+    rewirings = sorted(subset['rew'].unique())
+    densities = sorted(subset['density'].unique())
+    
+    n_rows = len(rewirings)
+    n_cols = len(densities)
+    
+    fig, axes = plt.subplots(n_rows, n_cols, figsize=(4.5 * n_cols, 4 * n_rows),
+                            squeeze=False, layout='constrained')
+    
+    heatmap_obj = None
+    
+    for rew_idx, rew in enumerate(rewirings):
+        for dens_idx, density in enumerate(densities):
+            ax = axes[rew_idx, dens_idx]
+            
+            cell_data = subset[
+                (subset['rew'] == rew) &
+                (subset['density'] == density)
+            ]
+            
+            if len(cell_data) < 10:
+                ax.text(0.5, 0.5, 'Insufficient\ndata',
+                       ha='center', va='center', transform=ax.transAxes)
+                ax.set_title(f'$k={rew}$, $\\rho={density}$', fontsize=11, weight='bold')
+                ax.axis('off')
+                continue
+            
+            # Compute Mann-Whitney p-values
+            p_values = calculate_pairwise_mann_whitney(cell_data, methods)
+            
+            # Plot
+            heatmap = plot_mann_whitney_heatmap(ax, p_values, f'$k={rew}$, $\\rho={density}$')
+            if heatmap_obj is None:
+                heatmap_obj = heatmap
+            
+            if dens_idx > 0:
+                ax.set_yticklabels([])
+    
+    fig.suptitle(
+        f'Pairwise Mann-Whitney U Test: LRM Networks (n={n_nodes})\n'
+        f'(Stratified by Rewiring Level and Density)',
+        fontsize=16, weight='bold'
+    )
+    
+    if heatmap_obj is not None:
+        cbar = fig.colorbar(
+            heatmap_obj.collections[0],
+            ax=axes,
+            orientation='vertical',
+            fraction=0.02,
+            pad=0.02,
+            aspect=30,
+            ticks=[0, 1, 2, 3],
+            boundaries=[-0.5, 0.5, 1.5, 2.5, 3.5]
+        )
+        
+        cbar.set_label('Significance', fontsize=12)
+        cbar.set_ticklabels([r'$p \geq 0.05$', r'$p < 0.001$', r'$p < 0.01$', r'$p < 0.05$'])
+        cbar.outline.set_linewidth(1)
+        cbar.outline.set_edgecolor('0.5')
+        cbar.ax.tick_params(size=0)
+    
+    save_figure(fig, f'{save_name}-lrm-mann-whitney')
+    plt.show()
+
+
+create_stratified_mann_whitney_heatmaps_lrm(stat_data, 'statistical-stratified')
+```
+
 ### Insights from Stratified Analysis
 
 Stratified statistical visuals: critical difference diagrams and heatmaps are generated per slice (size, density, rewiring, temperature). Purpose: show how rankings and pairwise test outcomes vary when holding one parameter constant. How to read: bars connecting methods in CD diagrams mean no significant rank difference (Nemenyi). Separate clusters indicate rank separation. Heatmaps encode p-values and effect sizes for the same slices.
@@ -5246,6 +6127,7 @@ import numpy as np
 import scipy.stats as stats
 import scikit_posthocs as sp
 import pingouin as pg
+from mpl_toolkits.axes_grid1 import make_axes_locatable
 
 def calculate_pairwise_stats_composite(data, value_col='symmetry', method_col='method_display'):
     """
@@ -5417,7 +6299,8 @@ def create_composite_figure(
     gs_right = gs[1].subgridspec(2, 1, height_ratios=[1, 1])
     
     # 2. Pairwise Statistics (Heatmaps) - Right Top
-    gs_right_top = gs_right[0].subgridspec(1, 2)
+    # Add more space between the two heatmaps to accommodate colorbars
+    gs_right_top = gs_right[0].subgridspec(1, 2, wspace=0.15)
     ax_pval = fig.add_subplot(gs_right_top[0])
     ax_cohen = fig.add_subplot(gs_right_top[1])
     
@@ -5456,7 +6339,7 @@ def create_composite_figure(
     p_values_cat[(xc >= 0.05)] = 0
     np.fill_diagonal(p_values_cat.values, -1)
     
-    # Create the heatmap with seaborn (which handles colorbar positioning well)
+    # Create the heatmap without colorbar first
     # Heatmap data uses full range (-1 to 3), but colorbar will show only 0 to 3
     heatmap_pval = sns.heatmap(
         p_values_cat,
@@ -5464,23 +6347,27 @@ def create_composite_figure(
         vmin=-1,
         vmax=3,
         center=1,
-        cbar_kws={
-            'label': 'Significance',
-            'ticks': [0, 1, 2, 3],  # Only show non-diagonal values
-            'boundaries': [-0.5, 0.5, 1.5, 2.5, 3.5]  # Boundaries between discrete colors
-        },
+        cbar=False,  # Create colorbar manually for proper sizing
         ax=ax_pval,
         linewidths=0.5,
         linecolor='0',
         clip_on=False,
-        square=True,
-        cbar=True
+        square=True
+    )
+    
+    # Create colorbar with same height as the heatmap
+    divider_pval = make_axes_locatable(ax_pval)
+    cax_pval = divider_pval.append_axes("right", size="5%", pad=0.1)
+    cbar = plt.colorbar(
+        heatmap_pval.collections[0],
+        cax=cax_pval,
+        ticks=[0, 1, 2, 3],
+        boundaries=[-0.5, 0.5, 1.5, 2.5, 3.5]
     )
     
     # Customize the colorbar to show significance levels
     # Each tick is centered in its color band: 0=NS, 1=p<0.001, 2=p<0.01, 3=p<0.05
-    cbar = heatmap_pval.collections[0].colorbar
-    cbar.set_ticks([0, 1, 2, 3])
+    cbar.set_label('Significance', fontsize=12)
     cbar.set_ticklabels([r'$p \geq 0.05$', r'$p < 0.001$', r'$p < 0.01$', r'$p < 0.05$'])
     cbar.outline.set_linewidth(1)
     cbar.outline.set_edgecolor('0.5')
@@ -5496,7 +6383,7 @@ def create_composite_figure(
     # Use a muted diverging palette with symmetric range
     # Calculate symmetric range around 0
     max_abs_d = max(abs(cohen_d_matrix.min().min()), abs(cohen_d_matrix.max().max()))
-    sns.heatmap(
+    heatmap_cohen = sns.heatmap(
         cohen_d_matrix,
         annot=True,
         fmt=".2f",
@@ -5506,12 +6393,22 @@ def create_composite_figure(
         vmax=max_abs_d,
         mask=mask,
         ax=ax_cohen,
-        cbar_kws={'label': "Cohen's D"},
+        cbar=False,  # Create colorbar manually for proper sizing
         linewidths=0.5,
         linecolor='0',
         clip_on=False,
         square=True
     )
+    
+    # Create colorbar with same height as the heatmap
+    divider_cohen = make_axes_locatable(ax_cohen)
+    cax_cohen = divider_cohen.append_axes("right", size="5%", pad=0.1)
+    cbar_cohen = plt.colorbar(
+        heatmap_cohen.collections[0],
+        cax=cax_cohen
+    )
+    cbar_cohen.set_label("Cohen's D", fontsize=12)
+    
     ax_cohen.set_title("Pairwise Cohen's D", fontsize=14, weight='bold')
     #ax_cohen.tick_params(labelsize=12)
 
@@ -5607,7 +6504,7 @@ def create_composite_figure(
 #| fig-height: 10
 
 # Get all available combinations from the data
-standard_graph_types = ['BA', 'ER', 'GEO', 'GEO3D', 'DD', 'HK']
+standard_graph_types = STANDARD_GRAPH_TYPES
 
 # Get unique parameter combinations for standard graph types
 standard_combinations = unified_best[unified_best['graph_type'].isin(standard_graph_types)][
