@@ -1,13 +1,13 @@
 #!/bin/bash
-# PBS script for METHOD_NAME parameter sweep
-# Auto-generated from template - DO NOT EDIT DIRECTLY
+# PBS script for {{ method_name }} parameter sweep
+# Auto-generated from Jinja2 template - DO NOT EDIT DIRECTLY
 
-#PBS -N AGS_<METHOD_NAME>
-#PBS -l select=1:ncpus=<NCPUS>:mem=<MEM>:scratch_local=<SCRATCH>
-#PBS -l walltime=<WALLTIME>
-#PBS -J <START_INDEX>-<END_INDEX>
-#PBS -o <LOGS_DIR>/<METHOD_NAME>_job_^array_index^.out
-#PBS -e <LOGS_DIR>/<METHOD_NAME>_job_^array_index^.err
+#PBS -N {{ job_array_name }}
+#PBS -l select=1:ncpus={{ ncpus }}:mem={{ mem }}:scratch_local={{ scratch_local }}
+#PBS -l walltime={{ walltime }}
+#PBS -J {{ start_index }}-{{ end_index }}
+#PBS -o {{ logs_dir }}/{{ method_name }}_^array_index^.out
+#PBS -e {{ logs_dir }}/{{ method_name }}_^array_index^.err
 #PBS -m ae
 
 # Exit immediately if a command exits with a non-zero status
@@ -24,27 +24,29 @@ set -eo pipefail
 }
 
 # Path definitions
-STORAGE="<STORAGE_PATH>"
-PROJECT_DIR="$STORAGE/ags"
-SWEEP_DIR="$PROJECT_DIR/<SWEEP_DIR>"
-CONTAINER="$PROJECT_DIR/ags-optimizer.sif"
-DATA_DIR="$PROJECT_DIR/data/pidnebesna"
-RESULTS_BASE="$PROJECT_DIR/results"
+STORAGE="{{ storage_path }}"
+PROJECT_DIR="$STORAGE/{{ project_dir }}"
+SWEEP_DIR="$PROJECT_DIR/{{ sweep_dir }}"
+CONTAINER="$PROJECT_DIR/{{ container_name }}"
+DATA_DIR="$PROJECT_DIR/{{ data_subdir }}"
+RESULTS_BASE="$PROJECT_DIR/{{ results_subdir }}"
 
 # Method-specific parameters file
-PARAMS_FILE="$SWEEP_DIR/<METHOD_NAME>_parameters.txt"
+PARAMS_FILE="$SWEEP_DIR/{{ method_name }}_parameters.txt"
 
 # Local (scratch) paths
 LOCAL_CONFIG_NAME="config.yaml"
 LOCAL_DATA_DIR="data"
 
 echo "============================================"
-echo "AGS Parameter Sweep - <METHOD_NAME>"
+echo "AGS Parameter Sweep - {{ method_name }}"
+echo "Job Array: {{ job_array_name }}"
 echo "============================================"
-echo "Job Array Index: $PBS_ARRAY_INDEX"
+echo "PBS Array Index: $PBS_ARRAY_INDEX"
+echo "PBS Job ID: $PBS_JOBID"
 echo "Node: $(hostname)"
 echo "Start Time: $(date)"
-echo "Resources: <NCPUS> CPUs, <MEM> RAM, <WALLTIME> walltime"
+echo "Resources: {{ ncpus }} CPUs, {{ mem }} RAM, {{ walltime }} walltime"
 echo "============================================"
 
 # Setup scratch directory
@@ -72,16 +74,19 @@ if [[ -z "$params" ]]; then
 fi
 
 # Parse parameters
-read -r job_id method config_file simulation_range <<< "$params"
+read -r job_id method config_file simulation_range graph_types <<< "$params"
 
-echo "Job ID: $job_id"
-echo "Method: $method (should be <METHOD_NAME>)"
-echo "Config: $config_file"
-echo "Simulations: $simulation_range"
+echo ""
+echo "Job Configuration:"
+echo "  Global Job ID: $job_id (Config: configs/$config_file)"
+echo "  Method: $method"
+echo "  Simulations: $simulation_range"
+echo "  Graph Types: $graph_types"
+echo ""
 
 # Verify method matches
-if [[ "$method" != "<METHOD_NAME>" ]]; then
-    echo >&2 "ERROR: Method mismatch. Expected <METHOD_NAME>, got $method"
+if [[ "$method" != "{{ method_name }}" ]]; then
+    echo >&2 "ERROR: Method mismatch. Expected {{ method_name }}, got $method"
     exit 4
 fi
 
@@ -97,12 +102,22 @@ export PYTHONUNBUFFERED=1
 
 # Execute the computation
 echo "Starting computation..."
+
+# Build graph types argument
+graph_types_arg=""
+if [[ -n "$graph_types" ]]; then
+    # Convert comma-separated string to space-separated for bash array
+    IFS=',' read -ra graph_types_array <<< "$graph_types"
+    graph_types_arg="--graph-types ${graph_types_array[@]}"
+fi
+
 singularity exec "$CONTAINER" python3.11 /app/run.py \
     --methods "$method" \
     --config "$LOCAL_CONFIG_NAME" \
     --data-path "./$LOCAL_DATA_DIR" \
     --results-path "$RESULTS_BASE" \
-    --simulations "$simulation_range"
+    --simulations "$simulation_range" \
+    $graph_types_arg
 
 exit_status=$?
 

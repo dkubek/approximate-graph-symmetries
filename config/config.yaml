@@ -38,6 +38,10 @@ DimensionalityReduction:
   initial_tau: 1.0
   final_tau: 1.0e-6
   annealing_scheme: "cosine"
+
+# Naive Pairwise Swap method configuration
+NaivePairwiseSwap:
+  verbose: 0
   learning_rate: 0.1
   min_rel_improvement: 1.0e-4
   verbose: 0

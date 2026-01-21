@@ -39,7 +39,7 @@ ENV PATH="/opt/venv/bin:$PATH"
 RUN uv pip install --no-cache -r pyproject.toml
 
 # Install torch-linear-assignment from git (if not in pyproject.toml)
-RUN uv pip install --no-cache git+https://github.com/ivan-chai/torch-linear-assignment.git
+#RUN uv pip install --no-cache git+https://github.com/ivan-chai/torch-linear-assignment.git
 
 # Stage 2: Runtime stage
 FROM python:3.11-slim-bookworm AS runtime

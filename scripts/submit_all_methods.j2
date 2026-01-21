@@ -1,0 +1,17 @@
+#!/bin/bash
+# Submit all method-specific parameter sweeps
+# Auto-generated from Jinja2 template - DO NOT EDIT DIRECTLY
+
+# Get the directory where this script is located
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+echo 'Submitting parameter sweeps...'
+
+{% for job in jobs %}
+echo 'Submitting: qsub "$SCRIPT_DIR/{{ job.pbs_script }}"'
+qsub "$SCRIPT_DIR/{{ job.pbs_script }}"
+sleep 1
+
+{% endfor %}
+echo 'All jobs submitted!'
+echo 'Monitor with: qstat -u $USER'

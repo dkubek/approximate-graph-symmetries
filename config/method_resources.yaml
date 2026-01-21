@@ -11,30 +11,33 @@ method_resources:
     description: "QSA"
     
   InteriorPoint:
-    ncpus: 16
-    mem: "4gb"
-    scratch_local: "4gb"
-    walltime: "06:00:00"
-    description: "Interior Point with IPOPT - CPU intensive"
-    
-  Manifold:
-    ncpus: 16
+    ncpus: 2
     mem: "4gb"
     scratch_local: "4gb"
     walltime: "02:00:00"
-    description: "Manifold optimization - Memory intensive"
+    description: "Interior Point with IPOPT"
+    split_simulations: 10
     
-  OT4P4AS:
-    ncpus: 4
+  Manifold:
+    ncpus: 2
     mem: "4gb"
     scratch_local: "4gb"
-    walltime: "05:00:00"
+    walltime: "01:00:00"
+    description: "Manifold optimization"
+    split_simulations: 20
+    
+  OrthogonalRelaxation:
+    ncpus: 2
+    mem: "4gb"
+    scratch_local: "4gb"
+    walltime: "04:00:00"
     description: "Orthogonal Relaxation"
     split_simulations: 5
     
-  SoftSort:
-    ncpus: 4
+  DimensionalityReduction:
+    ncpus: 2
     mem: "4gb"
     scratch_local: "4gb"
-    walltime: "03:00:00"
+    walltime: "02:00:00"
     description: "Soft Sorting"
+    split_simulations: 20
