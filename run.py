@@ -378,7 +378,7 @@ def process_simulation(
                 f"Available indices: {min(available_sims)}-{max(available_sims)} "
                 f"(total: {len(available_sims)})"
             )
-        
+
         A = data[sim_idx].astype(np.float64)
 
         # Create method instance
@@ -642,7 +642,7 @@ def run_optimization(
             pbar.update(1)
             pbar.set_postfix(processed=processed, skipped=skipped, failed=failed)
 
-    print(f"\nProcessing complete!")
+    print("\nProcessing complete!")
     print(f"  Processed: {processed}")
     print(f"  Skipped (already exist): {skipped}")
     print(f"  Failed: {failed}")

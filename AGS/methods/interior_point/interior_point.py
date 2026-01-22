@@ -106,8 +106,6 @@ class InteriorPoint:
 
     def _setup_hessian_sparsity(self):
         """Compute sparsity pattern and values for the constant Hessian."""
-        n = self._n
-
         hess_sparse = sp.kron(self.A, self.A) + sp.kron(self.A, self.A)
 
         # Convert to COO format for easy indexing

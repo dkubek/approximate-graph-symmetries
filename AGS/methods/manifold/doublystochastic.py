@@ -26,7 +26,6 @@ from typing import Optional
 import logging
 import numpy as np
 from numba import jit
-import scipy.sparse.linalg
 from scipy.sparse.linalg import cg, lsqr, LinearOperator
 from pymanopt.manifolds.manifold import Manifold
 
@@ -293,7 +292,7 @@ class DoublyStochastic(Manifold):
             logging.debug(
                 f"Warning: Conjugate Gradient solver did not converge. Info: {info}"
             )
-            logging.debug(f"Using pseudoinverse to solve the linear system.")
+            logging.debug("Using pseudoinverse to solve the linear system.")
             return self._linear_solve_pinv(point, b)
 
         # Split the result back into alpha and beta

@@ -1,1 +1,1 @@
-from .manifold import Manifold
+from .manifold import Manifold as Manifold
