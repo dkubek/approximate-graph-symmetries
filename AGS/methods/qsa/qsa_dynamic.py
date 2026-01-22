@@ -1,16 +1,21 @@
 """
-SA: Symmetric Approximator with Frank-Wolfe and automatic differentiation.
+QSA-Dynamic: Frank-Wolfe solver with automatic differentiation.
 
-This module implements a Frank-Wolfe solver for the Relaxed Approximate 
-Symmetry Problem (rASP) with support for arbitrary differentiable objective 
-functions. Gradients are computed via PyTorch autograd, and step sizes are 
-determined using Armijo backtracking line search.
+This module reimplements the Quadratic Symmetry Approximator (QSA) with support
+for arbitrary differentiable objective functions. Gradients are computed via
+PyTorch autograd, and step sizes are determined using Armijo backtracking
+line search.
 
 The Frank-Wolfe algorithm operates on the Birkhoff polytope. At each iteration:
 1. Compute gradient of objective via autograd
 2. Solve linear assignment problem to find descent direction
 3. Find step size via Armijo line search
 4. Update P as convex combination
+
+References:
+    - Frank, M., & Wolfe, P. (1956). "An algorithm for quadratic programming."
+    - Armijo, L. (1966). "Minimization of functions having Lipschitz continuous
+      first partial derivatives."
 """
 
 import time
@@ -27,10 +32,10 @@ from AGS.initialization import (
     init_random_doubly_stochastic,
     init_random_permutation,
 )
-from AGS.methods.sa.objectives import get_objective
+from AGS.methods.qsa.objectives import get_objective
 
 
-class SymmetricApproximator:
+class QSADynamic:
     """
     Frank-Wolfe solver for rASP with automatic differentiation.
 
@@ -49,7 +54,7 @@ class SymmetricApproximator:
         verbose: int = 1,
     ):
         """
-        Initialize the Symmetric Approximator solver.
+        Initialize the QSA-Dynamic solver.
 
         Args:
             objective: Objective function. Either a string name from
