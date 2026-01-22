@@ -112,7 +112,7 @@ def get_annealing_tau(
                     are negative.
     """
 
-    if final_tau == None:
+    if final_tau is None:
         return initial_tau
 
     if scheme not in _SCHEME_MAP:

@@ -1,1 +1,1 @@
-from .dimensionality_reduction import DimensionalityReduction
+from .dimensionality_reduction import DimensionalityReduction as DimensionalityReduction

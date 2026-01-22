@@ -1,1 +1,1 @@
-from .orthogonal_relaxation import OrthogonalRelaxation
+from .orthogonal_relaxation import OrthogonalRelaxation as OrthogonalRelaxation

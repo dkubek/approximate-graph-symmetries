@@ -1,1 +1,1 @@
-from .qsa import QSA
+from .qsa import QSA as QSA

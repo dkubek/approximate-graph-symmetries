@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 # generate_jobs.py - Enhanced version with method-specific PBS generation
 
-import os
 import yaml
 import json
 import itertools
@@ -133,7 +132,16 @@ def create_job_configs(
     resource_config = load_resource_config(resource_config_file)
 
     # Define available graph types
-    available_graph_types = ["BA", "DD", "ER", "GEO", "GEO3D", "HK", "LRM_ER_rewired", "BRAIN"]
+    available_graph_types = [
+        "BA",
+        "DD",
+        "ER",
+        "GEO",
+        "GEO3D",
+        "HK",
+        "LRM_ER_rewired",
+        "BRAIN",
+    ]
 
     # Determine which graph types to process
     if graph_types:
@@ -191,7 +199,7 @@ def create_job_configs(
             else:
                 # Single job processes all graph types
                 graph_type_list = [graph_types_to_process]
-            
+
             for graph_types_subset in graph_type_list:
                 # Determine simulation count based on graph type(s)
                 if len(graph_types_subset) == 1:
@@ -202,7 +210,7 @@ def create_job_configs(
                 else:
                     # Multiple graph types - use default (should rarely happen)
                     total_simulations = 39
-                
+
                 # Get simulation splitting configuration
                 split_sims = None
                 if method_name in resource_config["method_resources"]:
@@ -347,9 +355,9 @@ def create_job_configs(
     print(f"\n{'=' * 60}")
     print(f"Total jobs generated: {len(all_jobs)}")
     print(f"Output directory: {output_dir}")
-    print(f"\nTo submit all jobs, run:")
+    print("\nTo submit all jobs, run:")
     print(f"  {submit_script}")
-    print(f"\nTo rerun specific jobs:")
+    print("\nTo rerun specific jobs:")
     print(f"  {rerun_script} <method> <indices>")
     print(f"  Examples: {rerun_script} QSA 5")
     print(f"            {rerun_script} Manifold 1-10")
