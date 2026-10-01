@@ -50,7 +50,9 @@ class Manifold:
         optimizer="steepest_descent",
         max_iter=500,
         verbose=1,
-        **optimizer_kwargs,
+        optimizer_kwargs: Optional[dict] = None,
+        run_kwargs: Optional[dict] = None,
+        manifold_kwargs: Optional[dict] = None,
     ):
         """
         Initializes the Manifold solver.
@@ -62,13 +64,23 @@ class Manifold:
             max_iter (int): The maximum number of iterations for the optimizer.
             verbose (int): Verbosity level for the `pymanopt` solver.
                 0 for quiet, 1 for summary, 2 for detailed iteration output.
-            **optimizer_kwargs: Additional keyword arguments to be passed
-                directly to the chosen `pymanopt` optimizer.
+            optimizer_kwargs (dict, optional): Keyword arguments passed to the
+                `pymanopt` optimizer constructor (e.g. `beta_rule` for
+                conjugate gradient, `min_step_size`, `max_time`).
+            run_kwargs (dict, optional): Keyword arguments passed to the
+                optimizer's `run` method (e.g. `Delta_bar`, `Delta0`,
+                `maxinner` for trust regions).
+            manifold_kwargs (dict, optional): Keyword arguments passed to the
+                `DoublyStochastic` manifold (e.g. `retraction_method`,
+                `max_sinkhorn_iters`, `sinkhorn_tol`, `eps`).
         """
 
         self.optimizer = optimizer
         self.max_iter = max_iter
-        self.optimizer_kwargs = optimizer_kwargs
+        self.optimizer_kwargs = dict(optimizer_kwargs or {})
+        self.run_kwargs = dict(run_kwargs or {})
+        self.manifold_kwargs = {"retraction_method": "sinkhorn"}
+        self.manifold_kwargs.update(manifold_kwargs or {})
 
         self.verbose = verbose
 
@@ -117,7 +129,7 @@ class Manifold:
         c = torch.from_numpy(c.astype(float)).to(device=self.device, dtype=self.dtype)
 
         # Create manifold
-        manifold = DoublyStochastic(n, retraction_method="sinkhorn")
+        manifold = DoublyStochastic(n, **self.manifold_kwargs)
 
         # Define cost function
         @pymanopt.function.pytorch(manifold)
@@ -161,7 +173,7 @@ class Manifold:
 
         # Run optimization
         start_time = time.time()
-        result = opt.run(problem, initial_point=P0)
+        result = opt.run(problem, initial_point=P0, **self.run_kwargs)
         end_time = time.time()
 
         # Convert the result back to numpy
@@ -169,5 +181,11 @@ class Manifold:
 
         return {
             "P": P_opt,
-            "metrics": {"time": end_time - start_time, "iterations": result.iterations},
+            "metrics": {
+                "time": end_time - start_time,
+                "iterations": result.iterations,
+                "cost": float(result.cost),
+                "gradient_norm": float(result.gradient_norm),
+                "stopping_criterion": result.stopping_criterion,
+            },
         }

@@ -87,6 +87,10 @@ class DoublyStochastic(Manifold):
             Sinkhorn-Knopp algorithm used in retractions.
         pcg_threshold (int): A threshold for `n` above which a PCG solver is
             used for linear systems.
+        sinkhorn_tol (float): Convergence tolerance of the Sinkhorn-Knopp
+            iterations used in retractions.
+        eps (float): Lower bound on matrix entries, used to keep the Fisher
+            metric and the retraction well defined.
 
     References:
         .. [Douik2018] A. Douik and B. Hassibi, "Manifold Optimization Over the Set
@@ -101,11 +105,13 @@ class DoublyStochastic(Manifold):
         retraction_method: str = "simple",
         max_sinkhorn_iters: Optional[int] = None,
         pcg_threshold: int = 100,
+        sinkhorn_tol: float = 1e-8,
+        eps: float = 1e-8,
     ):
         self._n = n
         self._retraction_method = retraction_method
         self._max_sinkhorn_iters = max_sinkhorn_iters or (100 + 2 * n)
-        self._sinkhorn_tol = 1e-8
+        self._sinkhorn_tol = sinkhorn_tol
         self._pcg_threshold = pcg_threshold
 
         name = f"Doubly stochastic manifold DS({n})"
@@ -114,8 +120,7 @@ class DoublyStochastic(Manifold):
 
         # Precompute reusable arrays
         self._e = np.ones(n)
-        # self._eps = np.finfo(np.float64).eps
-        self._eps = 1e-8
+        self._eps = eps
 
     @property
     def typical_dist(self):

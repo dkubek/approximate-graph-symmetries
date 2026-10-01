@@ -28,6 +28,7 @@ WORKDIR /app
 
 # Copy dependency files first (for better caching)
 COPY pyproject_container.toml pyproject.toml
+COPY container-constraints.txt .
 #COPY uv.lock* .
 
 # Create virtual environment and install dependencies
@@ -36,7 +37,7 @@ ENV VIRTUAL_ENV=/opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
 
 # Install dependencies
-RUN uv pip install --no-cache -r pyproject.toml
+RUN uv pip install --no-cache -r pyproject.toml -c container-constraints.txt
 
 # Install torch-linear-assignment from git (if not in pyproject.toml)
 #RUN uv pip install --no-cache git+https://github.com/ivan-chai/torch-linear-assignment.git

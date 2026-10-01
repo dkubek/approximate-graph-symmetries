@@ -65,7 +65,9 @@ class ManifoldConfig(BaseConfig):
 
     optimizer: str = "steepest_descent"
     max_iter: int = 500
-    # optimizer_kwargs: Dict[str, Any] = field(default_factory=dict)
+    optimizer_kwargs: Dict[str, Any] = field(default_factory=dict)
+    run_kwargs: Dict[str, Any] = field(default_factory=dict)
+    manifold_kwargs: Dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -203,6 +205,14 @@ def get_important_params(
                 "max_iter": method_config.max_iter,
             }
         )
+        # Non-default solver options are part of the name; with none set the
+        # name is unchanged, so earlier results remain valid.
+        for kwargs in (
+            method_config.optimizer_kwargs,
+            method_config.run_kwargs,
+            method_config.manifold_kwargs,
+        ):
+            params.update(kwargs)
     elif method_name == "OrthogonalRelaxation":
         params.update(
             {

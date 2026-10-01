@@ -1,0 +1,8 @@
+# Send only what the Dockerfile copies; keeps data and environments out of the build.
+*
+!pyproject_container.toml
+!container-constraints.txt
+!AGS
+!run.py
+!config/config.yaml
+**/__pycache__
