@@ -99,6 +99,8 @@ cp "$SWEEP_DIR/configs/$config_file" "$LOCAL_CONFIG_NAME" || {
 # Set up environment
 export SINGULARITY_BINDPATH="$SCRATCHDIR,$RESULTS_BASE"
 export PYTHONUNBUFFERED=1
+# Match thread pools to the reserved CPUs
+export OMP_NUM_THREADS={{ ncpus }} MKL_NUM_THREADS={{ ncpus }} OPENBLAS_NUM_THREADS={{ ncpus }} NUMBA_NUM_THREADS={{ ncpus }}
 
 # Execute the computation
 echo "Starting computation..."

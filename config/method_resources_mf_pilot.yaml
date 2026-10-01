@@ -1,0 +1,9 @@
+# Resources for the MF pilot sweep. Runs are single-process and single-threaded.
+method_resources:
+  Manifold:
+    ncpus: 1
+    mem: "4gb"
+    scratch_local: "4gb"
+    walltime: "03:00:00"
+    description: "Manifold optimization (CG / trust regions)"
+    split_simulations: 5

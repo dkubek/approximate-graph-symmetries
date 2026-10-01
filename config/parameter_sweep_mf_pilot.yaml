@@ -1,0 +1,19 @@
+# Pilot sweep: Riemannian CG and trust-region variants of MF (AMAI revision,
+# reviewer 2 comment 3). Steepest descent results come from the paper sweep
+# (sweep_2025-11-21-093506), which used the same instances and c values.
+parameter_sweeps:
+  - method: Manifold
+    c: [0.1, 0.2, 0.3, 0.4, 0.6, 1.0]
+    optimizer: ["conjugate_gradient"]
+    max_iter: [500]
+    optimizer_kwargs: [{}, {beta_rule: HagerZhang}]
+
+  - method: Manifold
+    c: [0.1, 0.2, 0.3, 0.4, 0.6, 1.0]
+    optimizer: ["trust_regions"]
+    max_iter: [500]
+    run_kwargs: [{Delta_bar: 1.0, Delta0: 0.125}, {Delta_bar: 0.3, Delta0: 0.0375}]
+
+global_params:
+  num_runs: 5
+  num_workers: 1
