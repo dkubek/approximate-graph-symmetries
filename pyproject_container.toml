@@ -28,7 +28,7 @@ dev = [
 ]
 
 [tool.uv.sources]
-torch-linear-assignment = { git = "https://github.com/ivan-chai/torch-linear-assignment.git" }
+torch-linear-assignment = { git = "https://github.com/ivan-chai/torch-linear-assignment.git", rev = "a73895ec43d3784fb3e9ffb6a83069c55702bd21" }
 torch = { index = "pytorch" }
 
 [[tool.uv.index]]

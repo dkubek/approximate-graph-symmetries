@@ -31,4 +31,3 @@ tqdm==4.67.1
 typing_extensions==4.15.0
 tzdata==2025.2
 torch==2.9.1
-torch-linear-assignment @ git+https://github.com/ivan-chai/torch-linear-assignment.git@a73895ec43d3784fb3e9ffb6a83069c55702bd21
