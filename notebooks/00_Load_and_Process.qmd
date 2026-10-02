@@ -61,7 +61,8 @@ OUTPUT_DIR = Path("processed_data")
 OUTPUT_FILENAME = "graph_symmetry_results_brain"
 
 # Directory names
-METHOD_DIRS = ["InteriorPoint", "Manifold", "QSA", 'DimensionalityReduction', 'OrthogonalRelaxation']
+METHOD_DIRS = ["InteriorPoint", "Manifold", "QSA", 'DimensionalityReduction', 'OrthogonalRelaxation',
+               "ManifoldCG", "ManifoldTR"]  # MF with conjugate gradient / trust regions
 GRAPH_TYPES = ["BA", "ER", "LRM_ER_rewired", "GEO", "GEO3D", "DD", "HK", "BRAIN"]
 
 # Subdirectory names
