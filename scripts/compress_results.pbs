@@ -25,5 +25,5 @@ echo "Packing $SRC on $(hostname) at $(date)"
 tar -czf "$SCRATCHDIR/$ARCHIVE" "$SRC"
 cp "$SCRATCHDIR/$ARCHIVE" "$PROJECT_DIR/$ARCHIVE.part"
 mv "$PROJECT_DIR/$ARCHIVE.part" "$PROJECT_DIR/$ARCHIVE"
-echo "Wrote $PROJECT_DIR/$ARCHIVE ($(du -h "$ARCHIVE" | cut -f1)) at $(date)"
+echo "Wrote $PROJECT_DIR/$ARCHIVE ($(stat -c %s "$ARCHIVE") bytes) at $(date)"
 clean_scratch || true
