@@ -1,0 +1,15 @@
+# Re-run of the paper's OR sweep (sweep_2025-11-21-093506) after the fix in
+# 7de33c6: the solver now returns the best rounded permutation it found.
+# Same parameter grid, instances and runs as the paper sweep.
+parameter_sweeps:
+  - method: OrthogonalRelaxation
+    c: [0.001, 0.01, 0.1, 10]
+    max_iter: [3000]
+    initial_tau: [0.3, 0.5, 0.7]
+    final_tau: [null]
+    loss: ["convex"]
+    annealing_scheme: ["cosine"]
+
+global_params:
+  num_runs: 5
+  num_workers: 1
