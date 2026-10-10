@@ -12,6 +12,8 @@ Usage (from the notebooks directory):
       ManifoldCG ManifoldTR
 
 --output-dir writes to a copy instead (the existing file is read from there too).
+--replace drops the existing rows of the methods first, but only for the graph
+types present in the new results, so rows of other graph types are kept.
 """
 
 import argparse
@@ -42,6 +44,8 @@ def main():
     parser.add_argument("output_name")
     parser.add_argument("methods", nargs="+")
     parser.add_argument("--output-dir", type=Path, help="default: the loader's OUTPUT_DIR")
+    parser.add_argument("--replace", action="store_true",
+                        help="replace the methods' rows for the graph types in results_dir")
     args = parser.parse_args()
     results_dir, output_name, methods = args.results_dir, args.output_name, args.methods
     ns = loader_namespace()
@@ -51,13 +55,22 @@ def main():
 
     existing = pd.read_pickle(pkl)
     clash = set(existing.method.unique()) & set(methods)
-    if clash:
+    if clash and not args.replace:
         raise SystemExit(f"{pkl} already contains {sorted(clash)}; not appending twice")
 
     new = ns["load_all_data"](results_dir, ns["DATA_DIR"])
     if new.empty:
         raise SystemExit("no rows loaded")
+    if args.replace:
+        replaced = existing.method.isin(methods) & existing.graph_type.isin(new.graph_type.unique())
+        print(f"replacing {replaced.sum()} rows of {sorted(clash)} for {sorted(new.graph_type.unique())}")
+        existing = existing[~replaced]
     combined = pd.concat([existing, new], ignore_index=True)
+    # Keep the existing column types, e.g. a column of None in the new rows
+    # would otherwise turn a float column into object
+    for col, dtype in existing.dtypes.items():
+        if combined[col].dtype != dtype:
+            combined[col] = combined[col].astype(dtype)
 
     stamp = time.strftime("%Y%m%d-%H%M%S")
     for path in (pkl, csv):
@@ -65,7 +78,7 @@ def main():
             path.rename(path.with_name(f"{path.name}.bak-{stamp}"))
     combined.to_pickle(pkl)
     combined.to_csv(csv, index=False)
-    print(f"appended {len(new)} rows ({sorted(new.method.unique())}) -> {len(combined)} rows in {pkl} and {csv}")
+    print(f"{'replaced with' if args.replace else 'appended'} {len(new)} rows ({sorted(new.method.unique())}) -> {len(combined)} rows in {pkl} and {csv}")
 
 
 if __name__ == "__main__":
