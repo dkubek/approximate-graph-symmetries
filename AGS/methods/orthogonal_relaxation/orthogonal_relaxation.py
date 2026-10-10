@@ -171,8 +171,6 @@ class OrthogonalRelaxation:
 
         # Initialize tracking variables
         best_loss = float("inf")
-        with torch.no_grad():
-            best_perm = model(weightP, tau=0).clone()
         best_iteration = 0
 
         pbar = tqdm(range(self.max_iter), disable=(self.verbose < 1))
@@ -204,9 +202,6 @@ class OrthogonalRelaxation:
             # Check for improvement
             if loss_val < best_loss * (1 - self.min_rel_improvement):
                 best_loss = loss_val
-                # Store the permutation itself: update_base() re-centres the
-                # base every step, so weightP alone does not determine it
-                best_perm = perm_matrix_val.clone()
                 best_iteration = i + 1
 
             # Update model base
@@ -217,7 +212,10 @@ class OrthogonalRelaxation:
 
         end_time = time()
 
-        P_opt = best_perm.cpu().numpy()
+        # Return the rounded final iterate, as QSA, MF and IP do. After
+        # update_base() the weights are zero, so this rounds the final base.
+        with torch.no_grad():
+            P_opt = model(weightP, tau=0).cpu().numpy()
 
         return {
             "P": P_opt,
