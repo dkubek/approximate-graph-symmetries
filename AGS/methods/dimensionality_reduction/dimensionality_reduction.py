@@ -208,7 +208,6 @@ class DimensionalityReduction:
 
         # Initialize tracking variables
         best_loss = float("inf")
-        best_s = s
         best_iteration = 0
 
         pbar = tqdm(range(self.max_iter), disable=(self.verbose < 1))
@@ -242,7 +241,6 @@ class DimensionalityReduction:
             # Check for improvement
             if loss_val < best_loss * (1 - self.min_rel_improvement):
                 best_loss = loss_val
-                best_s = s.clone().detach()
                 best_iteration = iteration + 1
 
             # Update progress bar
@@ -250,7 +248,10 @@ class DimensionalityReduction:
 
         end_time = time()
 
-        P_opt = soft_sort(best_s, tau=1e-8).cpu().numpy()
+        # Return the rounded final iterate, as all other methods do.
+        # best_iteration is still reported as a metric.
+        with torch.no_grad():
+            P_opt = soft_sort(s, tau=1e-8).cpu().numpy()
 
         return {
             "P": P_opt,
