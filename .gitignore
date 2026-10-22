@@ -202,3 +202,11 @@ poetry.toml
 pyrightconfig.json
 
 # End of https://www.toptal.com/developers/gitignore/api/python,julia
+
+# Experiment infrastructure and analysis, kept locally only
+scripts/
+notebooks/
+config/*
+!config/config.yaml
+sweep_*/
+*.tar.gz

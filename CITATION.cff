@@ -5,27 +5,22 @@ message: >-
 type: software
 title: "Approximate Graph Symmetries: continuous relaxations of the approximate symmetry problem"
 abstract: >-
-  Implementation and experiment pipeline for continuous relaxations of the
-  Approximate Symmetry Problem (ASP): the Quadratic Symmetry Approximator (QSA)
-  baseline, an interior-point method (IP), orthogonal relaxation (OR),
-  Riemannian manifold optimization on the doubly stochastic matrices (MF), and
-  a dimensionality-reduction method (DR), together with the random graph
-  generators and parameter-sweep scripts used in the article.
+  Implementation of continuous relaxations of the Approximate Symmetry
+  Problem (ASP): the Quadratic Symmetry Approximator (QSA) baseline, an
+  interior-point method (IP), orthogonal relaxation (OR), Riemannian manifold
+  optimization on the doubly stochastic matrices (MF), and a
+  dimensionality-reduction method (DR).
 authors:
   - given-names: Dávid
     family-names: Kubek
     email: kubek@cs.cas.cz
     affiliation: Institute of Computer Science of the Czech Academy of Sciences
     # orcid: "https://orcid.org/0000-0000-0000-0000"
-version: 1.0.0
+version: 1.0.1
 date-released: "2026-10-22"
 license: MIT
 repository-code: "https://github.com/dkubek/approximate-graph-symmetries"
 doi: 10.5281/zenodo.23561550
-identifiers:
-  - type: doi
-    value: 10.5281/zenodo.23561551
-    description: Version 1.0.0, used in the article
 keywords:
   - approximate symmetry
   - graph automorphism

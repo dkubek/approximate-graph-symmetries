@@ -1,7 +1,7 @@
 {
   "title": "Approximate Graph Symmetries: continuous relaxations of the approximate symmetry problem",
   "upload_type": "software",
-  "description": "<p>Implementation and experiment pipeline for continuous relaxations of the Approximate Symmetry Problem (ASP): the Quadratic Symmetry Approximator (QSA) baseline, an interior-point method (IP), orthogonal relaxation (OR), Riemannian manifold optimization on the doubly stochastic matrices (MF, with steepest-descent, conjugate-gradient and trust-region optimizers), and a dimensionality-reduction method (DR), together with the random graph generators, parameter-sweep scripts and analysis notebooks used in the article \"Relaxations of the approximate symmetry problem\" (D. Kubek, D. Hartman, J. Hlinka, C. Matonoha), submitted to Annals of Mathematics and Artificial Intelligence.</p>",
+  "description": "<p>Implementation of continuous relaxations of the Approximate Symmetry Problem (ASP): the Quadratic Symmetry Approximator (QSA) baseline, an interior-point method (IP), orthogonal relaxation (OR), Riemannian manifold optimization on the doubly stochastic matrices (MF, with steepest-descent, conjugate-gradient and trust-region optimizers), and a dimensionality-reduction method (DR), as used in the article \"Relaxations of the approximate symmetry problem\" (D. Kubek, D. Hartman, J. Hlinka, C. Matonoha), submitted to Annals of Mathematics and Artificial Intelligence.</p>",
   "creators": [
     {
       "name": "Kubek, Dávid",
