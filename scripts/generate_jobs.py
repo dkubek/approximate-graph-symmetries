@@ -11,17 +11,19 @@ import argparse
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 
 
-# Graph type specific simulation counts
+# Simulation indices (first, last) stored in the data files of each graph type.
+# DD, GEO, GEO3D and HK are numbered from 1, the other types from 0.
 GRAPH_TYPE_SIMULATIONS = {
-    "BA": 39,
-    "ER": 39,
-    "DD": 39,
-    "GEO": 39,
-    "GEO3D": 39,
-    "HK": 39,
-    "LRM_ER_rewired": 39,
-    "BRAIN": 88,
+    "BA": (0, 38),
+    "ER": (0, 38),
+    "DD": (1, 39),
+    "GEO": (1, 39),
+    "GEO3D": (1, 39),
+    "HK": (1, 39),
+    "LRM_ER_rewired": (0, 38),
+    "BRAIN": (0, 87),
 }
+DEFAULT_SIMULATIONS = (0, 38)
 
 
 def load_parameter_config(config_file):
@@ -53,11 +55,11 @@ def generate_parameter_combinations(method_name, method_params):
     return combinations
 
 
-def split_simulation_ranges(total_sims, group_size):
-    """Split total simulations into ranges of group_size."""
+def split_simulation_ranges(first, last, group_size):
+    """Split the simulations first..last into ranges of group_size."""
     ranges = []
-    for start in range(0, total_sims, group_size):
-        end = min(start + group_size - 1, total_sims - 1)
+    for start in range(first, last + 1, group_size):
+        end = min(start + group_size - 1, last)
         ranges.append(f"{start}-{end}")
     return ranges
 
@@ -193,15 +195,18 @@ def create_job_configs(
                 graph_type_list = [graph_types_to_process]
             
             for graph_types_subset in graph_type_list:
-                # Determine simulation count based on graph type(s)
-                if len(graph_types_subset) == 1:
-                    # Single graph type - use its specific simulation count
-                    total_simulations = GRAPH_TYPE_SIMULATIONS.get(
-                        graph_types_subset[0], 39
+                # Simulation indices of the graph type(s); a job over several
+                # types needs the same indices in all of them
+                sim_bounds = {
+                    GRAPH_TYPE_SIMULATIONS.get(gt, DEFAULT_SIMULATIONS)
+                    for gt in graph_types_subset
+                }
+                if len(sim_bounds) > 1:
+                    raise ValueError(
+                        f"Graph types {graph_types_subset} have different simulation "
+                        "indices; generate the jobs split by graph type"
                     )
-                else:
-                    # Multiple graph types - use default (should rarely happen)
-                    total_simulations = 39
+                first_sim, last_sim = sim_bounds.pop()
                 
                 # Get simulation splitting configuration
                 split_sims = None
@@ -212,10 +217,10 @@ def create_job_configs(
 
                 # Generate simulation ranges
                 if split_sims:
-                    sim_ranges = split_simulation_ranges(total_simulations, split_sims)
+                    sim_ranges = split_simulation_ranges(first_sim, last_sim, split_sims)
                 else:
                     # No splitting - single range covering all simulations
-                    sim_ranges = [f"0-{total_simulations - 1}"]
+                    sim_ranges = [f"{first_sim}-{last_sim}"]
 
                 for sim_range in sim_ranges:
                     global_job_id += 1
