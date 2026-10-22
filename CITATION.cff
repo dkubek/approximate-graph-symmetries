@@ -1,0 +1,53 @@
+cff-version: 1.2.0
+message: >-
+  If you use this software, please cite the accompanying article
+  (see preferred-citation) and the archived software version you used.
+type: software
+title: "Approximate Graph Symmetries: continuous relaxations of the approximate symmetry problem"
+abstract: >-
+  Implementation and experiment pipeline for continuous relaxations of the
+  Approximate Symmetry Problem (ASP): the Quadratic Symmetry Approximator (QSA)
+  baseline, an interior-point method (IP), orthogonal relaxation (OR),
+  Riemannian manifold optimization on the doubly stochastic matrices (MF), and
+  a dimensionality-reduction method (DR), together with the random graph
+  generators and parameter-sweep scripts used in the article.
+authors:
+  - given-names: Dávid
+    family-names: Kubek
+    email: kubek@cs.cas.cz
+    affiliation: Institute of Computer Science of the Czech Academy of Sciences
+    # orcid: "https://orcid.org/0000-0000-0000-0000"
+version: 1.0.0
+date-released: "2026-10-22"
+license: MIT
+repository-code: "https://github.com/dkubek/approximate-graph-symmetries"
+# doi: 10.5281/zenodo.XXXXXXX  # add the Zenodo concept DOI after the first release
+keywords:
+  - approximate symmetry
+  - graph automorphism
+  - continuous relaxation
+  - doubly stochastic matrices
+  - manifold optimization
+  - complex networks
+preferred-citation:
+  type: article
+  title: "Relaxations of the approximate symmetry problem"
+  authors:
+    - given-names: Dávid
+      family-names: Kubek
+      affiliation: Institute of Computer Science of the Czech Academy of Sciences
+      # orcid: "https://orcid.org/0000-0000-0000-0000"
+    - given-names: David
+      family-names: Hartman
+      affiliation: Institute of Computer Science of the Czech Academy of Sciences
+      # orcid: "https://orcid.org/0000-0000-0000-0000"
+    - given-names: Jaroslav
+      family-names: Hlinka
+      affiliation: Institute of Computer Science of the Czech Academy of Sciences
+      # orcid: "https://orcid.org/0000-0000-0000-0000"
+    - given-names: Ctirad
+      family-names: Matonoha
+      affiliation: Institute of Computer Science of the Czech Academy of Sciences
+      # orcid: "https://orcid.org/0000-0000-0000-0000"
+  journal: "Annals of Mathematics and Artificial Intelligence"
+  status: submitted
