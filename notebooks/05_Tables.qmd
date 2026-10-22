@@ -1,0 +1,455 @@
+---
+title: "Tables generated from data"
+author: "David Kubek"
+format:
+  html:
+    toc: true
+    code-fold: true
+    code-summary: "Show code"
+    self-contained: true
+jupyter: python3
+execute:
+  warning: false
+  message: false
+---
+
+# Purpose
+
+Every table of the paper and of the revision documents is generated from data.
+`04_Final.qmd` writes the result tables (Tables A1, A2 and B3). This notebook writes
+the remaining ones, which used to be typed by hand:
+
+| Output | Used in |
+|---|---|
+| `tables/synthetic_models.tex` | manuscript, Table 1 (`tab:synthetic-models`) |
+| `tables/method_configurations.tex` | manuscript, Table C1 (`tab:method-properties`) |
+| `tables/cost/quality_cost.tex` | proposed manuscript table `tab:quality-cost` (R1 trade-off) |
+| `tables/cost/time_per_run.tex` | cost sketch (R1), Section 1.1 |
+| `tables/cost/qsa_restarts.tex` | cost sketch, Section 3.1 |
+| `tables/cost/qsa_portfolio.tex` | cost sketch, Section 3.2 |
+| `tables/cost/nps.tex` | cost sketch, Section 3.4 |
+
+Inputs: the processed results (`00_Load_and_Process.qmd`), the per-graph-type parameters
+selected by `04_Final.qmd` (its `tables/optimal_parameters_per_graph_type_*.tex`, so
+render `04_Final.qmd` first), and, for the transposition baseline, the synthetic
+graphs in `../data/kubek`. Only synthetic network types are read.
+
+Values that the results files do not record (the name of each algorithm, PyManopt
+defaults) come from the `METHODS` dictionary below; everything else is read from the data.
+
+```{python}
+#| label: configuration
+from pathlib import Path
+
+RESULTS_FILE = Path("processed_data/graph_symmetry_results_all.pkl")
+GRAPH_DIR = Path("../data/kubek")
+TABLE_DIR = Path("tables")
+COST_TABLE_DIR = TABLE_DIR / "cost"
+N = 100  # network size for the cost tables
+```
+
+```{python}
+#| label: setup
+import pickle
+import re
+
+import numpy as np
+import pandas as pd
+
+TABLE_DIR.mkdir(parents=True, exist_ok=True)
+COST_TABLE_DIR.mkdir(parents=True, exist_ok=True)
+
+# Synthetic network types: directory/label in the data -> label in the paper
+GRAPH_TYPES = {"ER": "ER", "BA": "BA", "LRM_ER": "LRM", "GEO": "GEO2D",
+               "GEO3D": "GEO3D", "DD": "DD", "HK": "HK"}
+GRAPH_DIRS = {"ER": "ER", "BA": "BA", "LRM_ER_rewired": "LRM", "GEO": "GEO2D",
+              "GEO3D": "GEO3D", "DD": "DD", "HK": "HK"}
+MODEL_NAMES = {"ER": r"Erd\H{o}s-R\'enyi", "BA": r"Barab\'asi-Albert", "LRM": "LRM",
+               "GEO2D": "Random Geometric 2D", "GEO3D": "Random Geometric 3D",
+               "DD": "Duplication-Divergence", "HK": "Holme-Kim"}
+TYPE_ORDER = ["ER", "BA", "LRM", "GEO2D", "GEO3D", "DD", "HK"]
+STANDARD = ["ER", "BA", "GEO2D", "GEO3D", "DD", "HK"]
+# LRM rewiring level code in the data -> number of rewired edges k (as in 04_Final.qmd)
+REWIRING = {0: 0, 1: 13, 2: 50, 3: 130}
+
+# Facts the results files do not record. Order = order of Table C1.
+METHODS = {
+    "InteriorPoint": dict(abbr="IP", label="meth:ip", name="Interior-Point",
+                          algorithm="IPOPT (Primal-Dual IPM)", family="penalty"),
+    "Manifold": dict(abbr="MF", label="meth:mf", name="Manifold Optimization",
+                     algorithm="Steepest Descent", family="penalty",
+                     extra=[r"Default \texttt{PyManopt} settings"]),
+    "ManifoldCG": dict(abbr="MF-CG", label="meth:mf", name="Manifold Optimization",
+                       algorithm="Conjugate Gradient", family="penalty",
+                       extra=[r"Hestenes--Stiefel rule (\texttt{PyManopt} default)"]),
+    "ManifoldTR": dict(abbr="MF-TR", label="meth:mf", name="Manifold Optimization",
+                       algorithm="Trust Regions", family="penalty"),
+    "QSA": dict(abbr="QSA", label="meth:qsa", name="Quadratic Symmetry Approx.",
+                algorithm="Frank-Wolfe", family="penalty"),
+    "DimensionalityReduction": dict(abbr="DR", label="meth:dr", name="Dimensionality Reduction",
+                                    algorithm="AdamW Optimizer", family="temperature"),
+    "OrthogonalRelaxation": dict(abbr="OR", label="meth:or", name="Orthogonal Relaxation",
+                                 algorithm="AdamW Optimizer", family="temperature"),
+}
+ABBR = {m: v["abbr"] for m, v in METHODS.items()}
+ORDER = ["QSA", "MF", "MF-CG", "MF-TR", "IP", "OR", "DR"]
+
+
+def m_(abbr):
+    """Method abbreviation as in the manuscript (\\methabbr link)."""
+    label = next(v["label"] for v in METHODS.values() if v["abbr"] == abbr)
+    return rf"\methabbr{{{label}}}{{{abbr}}}"
+
+
+def pct(x):
+    """Relative change as a signed percentage."""
+    p = round(100 * x)
+    return "0\\%" if p == 0 else f"${p:+d}$\\%"
+
+
+def write(path, text):
+    path.write_text(text)
+    print(f"wrote {path}")
+```
+
+```{python}
+#| label: load-data
+df = pd.read_pickle(RESULTS_FILE)
+df = df[df["graph_type"].isin(GRAPH_TYPES)].copy()   # synthetic networks only
+df["graph_type"] = df["graph_type"].map(GRAPH_TYPES)
+df["m"] = df["method"].map(ABBR)
+df = df[df["m"].notna()]
+df["identity"] = df["n_nodes"] == df["fixed_points"]
+KEY = ["graph_type", "n_nodes", "density", "rew", "sim_id"]
+df["rew"] = df["rew"].fillna(-1)   # -1: no rewiring parameter
+print(f"{len(df):,} runs, methods: {sorted(df.m.unique())}")
+```
+
+# Manuscript tables
+
+## Table 1: synthetic network configurations
+
+```{python}
+#| label: tbl-synthetic-models
+def fmt_set(values, fmt="{}"):
+    return r"$\{" + ",".join(fmt.format(v) for v in values) + r"\}$"
+
+# An instance counts if every method has results for it
+inst = df.groupby(["graph_type", "n_nodes", "density", "rew", "m"]).sim_id.nunique()
+inst_per_config = inst.groupby(["graph_type", "n_nodes", "density", "rew"]).min()
+
+rows = []
+for g in TYPE_ORDER:
+    d = df[df.graph_type == g]
+    ks = sorted(r for r in d.rew.unique() if r >= 0)
+    counts = sorted(inst_per_config.loc[g].unique())
+    rows.append(dict(
+        model=MODEL_NAMES[g],
+        n=fmt_set(sorted(d.n_nodes.unique())),
+        rho=fmt_set([f"{v / 100:.2f}" for v in sorted(d.density.unique())]),   # stored in percent
+        k=fmt_set([REWIRING[int(r)] for r in ks]) if ks else "---",
+        inst="--".join(map(str, (counts[0], counts[-1]))) if len(counts) > 1 else str(counts[0]),
+    ))
+t1 = pd.DataFrame(rows)
+t1
+```
+
+```{python}
+#| label: write-synthetic-models
+lines = [rf"    {r.model} & {r.n} & {r.rho} & {r.k} & {r.inst} \\" for r in t1.itertuples()]
+runs = sorted(df.num_runs.unique())
+write(TABLE_DIR / "synthetic_models.tex", "\n".join([
+    r"% Generated by notebooks/05_Tables.qmd from the results data; do not edit.",
+    r"\begin{table}[htbp]",
+    r"  \centering",
+    r"  \caption{Summary of synthetic network model configurations used in",
+    rf"  experiments. Each method is run {runs[0]} times on every instance.}}",
+    r"  \begin{tabular}{lcccc}",
+    r"    \toprule",
+    r"    & \multicolumn{3}{c}{Parameters} & \\",
+    r"    \cmidrule(lr){2-4}",
+    r"    Model & Vertices ($n$) & Density ($\rho$) & Rewiring ($k$) & Instances \\",
+    r"    \midrule",
+    *lines,
+    r"    \bottomrule",
+    r"  \end{tabular}",
+    r"  \label{tab:synthetic-models}",
+    r"\end{table}", ""]))
+```
+
+## Table C1: method configurations
+
+```{python}
+#| label: tbl-method-configurations
+def grid(values):
+    """Compact set notation for a parameter grid; arithmetic progressions are abbreviated."""
+    v = sorted(float(x) for x in values)
+    steps = np.diff(v)
+    # equally spaced grids keep the decimals of their step (0.1, 0.2, ..., 2.0)
+    dec = max(0, -int(np.floor(np.log10(steps[0])))) if len(v) > 1 and np.allclose(steps, steps[0]) else None
+    fmt = (lambda x: f"{x:.{dec}f}") if dec is not None else (lambda x: f"{x:g}")
+    if len(v) > 4 and np.allclose(steps, steps[0]):
+        return rf"$\{{{fmt(v[0])}, {fmt(v[1])}, \dots, {fmt(v[-1])}\}}$ ({len(v)} values)"
+    return r"$\{" + ", ".join(fmt(x) for x in v) + r"\}$"
+
+def one(d, col):
+    vals = d[col].dropna().unique()
+    assert len(vals) == 1, (col, vals)
+    return vals[0]
+
+entries = {}
+for method, meta in METHODS.items():
+    d = df[df.method == method]
+    hp = []
+    if meta["family"] == "temperature":
+        hp.append(f"Loss: {one(d, 'method_loss').capitalize()}")
+        hp.append(rf"Temperature ($\tau$): {grid(d.method_initial_tau.dropna().unique())}")
+        hp.append(f"Annealing: {one(d, 'method_annealing_scheme')}")
+        hp.append(f"Learning Rate: {one(d, 'method_learning_rate'):g}")
+    if d.method_tol.notna().any():
+        hp.append(rf"Tolerance: $10^{{{int(round(np.log10(one(d, 'method_tol'))))}}}$")
+    if d.method_Delta_bar.notna().any():
+        hp.append(rf"$\bar\Delta = {one(d, 'method_Delta_bar'):g}$, "
+                  rf"$\Delta_0 = {one(d, 'method_Delta0'):g}$")
+    hp += meta.get("extra", [])
+    hp.append(f"Penalty ($c$): {grid(d.c.unique())}")
+    entries[method] = dict(name=meta["name"], abbr=m_(meta["abbr"]), alg=meta["algorithm"],
+                           max_iter=int(one(d, "method_max_iter")), hp=hp, family=meta["family"])
+pd.DataFrame({m: dict(max_iter=e["max_iter"], hp="; ".join(e["hp"])) for m, e in entries.items()}).T
+```
+
+```{python}
+#| label: write-method-configurations
+def row(e):
+    hp = (r"\begin{tabular}[t]{@{}l@{}}" + " \\\\ ".join(e["hp"]) + r"\end{tabular}"
+          if len(e["hp"]) > 1 else e["hp"][0])
+    return rf"    {e['name']} & {e['abbr']} & {e['alg']} & {e['max_iter']} & {hp} \\"
+
+groups = [("penalty", "Iterative Methods on the Birkhoff Polytope"),
+          ("temperature", "Alternative Parametrization Methods")]
+body = []
+for fam, title in groups:
+    body += [r"    \midrule", rf"    \multicolumn{{5}}{{l}}{{\textit{{{title}}}}} \\", r"    \midrule"]
+    body += [row(e) for e in entries.values() if e["family"] == fam]
+write(TABLE_DIR / "method_configurations.tex", "\n".join([
+    r"% Generated by notebooks/05_Tables.qmd from the results data; do not edit.",
+    r"\begin{sidewaystable}",
+    r"  \centering",
+    r"  \caption{Summary of core configurations and hyperparameters for",
+    r"  each optimization method.}\label{tab:method-properties}",
+    r"  \begin{tabular}{@{}lllll@{}}",
+    r"    \toprule",
+    r"    \textbf{Method} & \textbf{Abbr.} & \textbf{Core Algorithm /",
+    r"    Optimizer} & \textbf{Max Iter.} & \textbf{Key Hyperparameters Tested} \\",
+    *body,
+    r"    \bottomrule",
+    r"  \end{tabular}",
+    r"\end{sidewaystable}", ""]))
+```
+
+# Cost tables (Reviewer 1: Table B3 and the trade-off)
+
+All cost tables use the per-graph-type parameters selected by `04_Final.qmd` and
+networks with $n = 100$ unless stated otherwise.
+
+```{python}
+#| label: selected-parameters
+def read_params(name):
+    rows = {}
+    for line in (TABLE_DIR / name).read_text().splitlines():
+        cells = [c.strip() for c in line.rstrip("\\ ").split("&")]
+        if len(cells) >= 3 and re.fullmatch(r"[\d.]+", cells[2] or "x"):
+            rows[(cells[0], cells[1])] = [float(x) for x in cells[2:] if x]
+    return rows
+
+P_ITER = read_params("optimal_parameters_per_graph_type_iterative.tex")
+P_TEMP = read_params("optimal_parameters_per_graph_type_temperature.tex")
+parts = [df[(df.m == m) & (df.graph_type == g) & np.isclose(df.c, c)]
+         for (m, g), (c,) in P_ITER.items()]
+parts += [df[(df.m == m) & (df.graph_type == g) & np.isclose(df.c, c)
+             & np.isclose(df.method_initial_tau, tau) & df.method_final_tau.isna()]
+          for (m, g), (c, tau) in P_TEMP.items()]
+sel = pd.concat(parts)
+assert set(sel.m) == set(ORDER), set(sel.m)
+nonid = sel[~sel.identity]
+pd.DataFrame([dict(method=m, type=g, c=v[0], tau=v[1] if len(v) > 1 else None)
+              for (m, g), v in (P_ITER | P_TEMP).items()])
+```
+
+## Proposed `tab:quality-cost`: quality versus cost
+
+For each network type, density (and, for LRM, rewiring level): the median over instances
+of the relative change of the best symmetry coefficient of five runs with respect to QSA,
+$(S_m - S_\mathrm{QSA}) / S_\mathrm{QSA}$, and in parentheses the median total time of the
+five runs in seconds. Not pooled over densities.
+
+```{python}
+#| label: tbl-quality-cost
+inst100 = (nonid[nonid.n_nodes == N].groupby(["m"] + KEY).symmetry.min().rename("S").to_frame()
+           .join(sel[sel.n_nodes == N].groupby(["m"] + KEY).metric_time.sum().rename("T"), how="outer")
+           .reset_index())
+qref = inst100[inst100.m == "QSA"].set_index(KEY).S.rename("Sq")
+inst100 = inst100.join(qref, on=KEY)
+inst100["rel"] = ((inst100.S - inst100.Sq) / inst100.Sq).replace([np.inf, -np.inf], np.nan)
+qc = inst100.groupby(["graph_type", "density", "rew", "m"]).agg(rel=("rel", "median"), T=("T", "median"))
+
+def cell(r, ref=False):
+    t = f"{r['T']:.1f}" if r["T"] < 10 else f"{r['T']:.0f}"
+    return f"0\\% ({t})" if ref else f"{pct(r.rel)} ({t})"
+
+lines = []
+keys = sorted(qc.index.droplevel("m").unique(),
+              key=lambda x: (TYPE_ORDER.index(x[0]) if x[0] != "LRM" else 99, x[1], x[2]))
+for g, rho, k in keys:
+    d = qc.loc[(g, rho, k)]
+    lab = g + (f", $k={REWIRING[int(k)]}$" if k >= 0 else "")
+    lines.append(f"{lab} & {rho / 100:.2f} & " + " & ".join(
+        cell(d.loc[m], ref=(m == "QSA")) for m in ORDER) + r" \\")
+write(COST_TABLE_DIR / "quality_cost.tex", "\n".join([
+    r"% Generated by notebooks/05_Tables.qmd; do not edit.",
+    r"\begin{tabular}{@{}ll" + "r" * len(ORDER) + "@{}}", r"\toprule",
+    r"Network & $\rho$ & " + " & ".join(m_(m) for m in ORDER) + r" \\", r"\midrule",
+    *lines, r"\bottomrule", r"\end{tabular}", ""]))
+qc.rel.unstack("m")[ORDER].map(lambda x: f"{100 * x:+.0f}%")
+```
+
+## Section 1.1: time per run
+
+```{python}
+#| label: tbl-time-per-run
+t100 = nonid[nonid.n_nodes == N]
+med = t100.groupby("m").metric_time.median()
+by_type = t100.groupby(["m", "graph_type"]).metric_time.median().unstack()
+# exponent b of time ~ n^b, fitted to the per-size medians of each standard type
+st = sel[sel.graph_type.isin(STANDARD)].groupby(["m", "graph_type", "n_nodes"]).metric_time.median()
+expo = st.groupby(["m", "graph_type"]).apply(
+    lambda s: np.polyfit(np.log(s.index.get_level_values("n_nodes")), np.log(s.values), 1)[0]).unstack()
+s100 = sel[sel.n_nodes == N]
+cap = (s100.metric_iterations >= s100.method_max_iter).groupby([s100.m, s100.graph_type]).mean().unstack()
+maxit = s100.groupby("m").method_max_iter.first().astype(int)
+
+def rng(s, f):
+    lo, hi = s.min(), s.max()
+    return f(lo) if f(lo) == f(hi) else f"{f(lo)}--{f(hi)}"
+
+lines = []
+for m in ORDER:
+    lines.append(
+        f"{m_(m)} & {med[m]:.3f} & {rng(by_type.loc[m], lambda x: f'{x:.2g}')} & "
+        f"{med[m] / med['QSA']:.0f} & {rng(expo.loc[m], lambda x: f'{x:.2f}')} & "
+        f"{rng(cap.loc[m], lambda x: f'{100 * x:.0f}')}\\% (cap {maxit[m]}) \\\\")
+write(COST_TABLE_DIR / "time_per_run.tex", "\n".join([
+    r"% Generated by notebooks/05_Tables.qmd; do not edit.",
+    r"\begin{tabular}{@{}lrrrrl@{}}", r"\toprule",
+    rf"Method & Median per run, $n={N}$ (s) & Range over types (s) & $\times$QSA & "
+    r"Exponent in $n$ & Runs at the iteration cap \\", r"\midrule", *lines,
+    r"\bottomrule", r"\end{tabular}", ""]))
+pd.DataFrame({"median": med, "x QSA": med / med["QSA"]}).reindex(ORDER)
+```
+
+## Section 3.1: more QSA restarts at the selected $c$
+
+```{python}
+#| label: tbl-qsa-restarts
+q = sel[(sel.m == "QSA") & (sel.n_nodes == N)].sort_values("run_id")
+q = q.assign(S=q.symmetry.where(~q.identity))
+# columns: best non-identity S of the first 1, 2, ... runs (identity runs are skipped)
+best_k = (q.groupby(KEY)["S"].apply(lambda s: s.cummin().ffill().reset_index(drop=True))
+          .unstack())
+rel = best_k.sub(best_k[0], axis=0).div(best_k[0], axis=0)
+rel = rel[best_k[0] > 0]       # first run non-identity with S > 0
+med_k = rel.groupby(["graph_type", "density"]).median()
+
+lines = []
+for g in TYPE_ORDER:
+    for i, rho in enumerate(sorted(df.density.unique())):
+        if (g, rho) not in med_k.index:
+            continue
+        r = med_k.loc[(g, rho)]
+        lab = (g + (" (all $k$)" if g == "LRM" else "")) if i == 0 else ""
+        lines.append(f"{lab} & {rho / 100:.2f} & " + " & ".join(pct(r[j]) for j in range(1, len(r))) + r" \\")
+ks = range(2, best_k.shape[1] + 1)
+write(COST_TABLE_DIR / "qsa_restarts.tex", "\n".join([
+    r"% Generated by notebooks/05_Tables.qmd; do not edit.",
+    r"\begin{tabular}{@{}ll" + "r" * len(ks) + "@{}}", r"\toprule",
+    r"Network & $\rho$ & " + " & ".join(f"best of {k}" for k in ks) + r" \\", r"\midrule",
+    *lines, r"\bottomrule", r"\end{tabular}", ""]))
+med_k.map(lambda x: f"{100 * x:+.0f}%")
+```
+
+## Section 3.2: the 100-run QSA portfolio
+
+```{python}
+#| label: tbl-qsa-portfolio
+# Best of all QSA runs of an instance (every c, every run) and its total time
+qa = df[(df.m == "QSA") & (df.n_nodes == N)]
+port = (qa.assign(S=qa.symmetry.where(~qa.identity)).groupby(KEY)
+        .agg(S100=("S", "min"), T100=("metric_time", "sum"), runs=("S", "size")))
+best = nonid[nonid.n_nodes == N].groupby(["m"] + KEY).symmetry.min().unstack("m")
+cmp_ = best.join(port)
+others = [m for m in ORDER if m != "QSA"]
+share = pd.DataFrame({m: (cmp_[m] < cmp_.S100 - 1e-12) for m in others})
+tab = share.groupby(level=["graph_type", "density", "rew"]).mean()
+t100 = cmp_.groupby(["graph_type", "density", "rew"]).T100.median()
+
+lines = []
+for (g, rho, k), r in tab.sort_index(key=lambda s: s.map(
+        lambda v: TYPE_ORDER.index(v) if v in TYPE_ORDER else v)).iterrows():
+    lab = g + (f", $k={REWIRING[int(k)]}$" if k >= 0 else "")
+    lines.append(f"{lab} & {rho / 100:.2f} & {t100[(g, rho, k)]:.1f} & "
+                 + " & ".join(f"{100 * r[m]:.0f}\\%" for m in others) + r" \\")
+write(COST_TABLE_DIR / "qsa_portfolio.tex", "\n".join([
+    r"% Generated by notebooks/05_Tables.qmd; do not edit.",
+    r"\begin{tabular}{@{}llr" + "r" * len(others) + "@{}}", r"\toprule",
+    rf"Network & $\rho$ & QSA-{int(port.runs.median())} time (s) & "
+    + " & ".join(others) + r" \\", r"\midrule", *lines, r"\bottomrule", r"\end{tabular}", ""]))
+print(f"QSA-portfolio size per instance: {sorted(port.runs.unique())}")
+(100 * tab).round(0)
+```
+
+## Section 3.4: the best single transposition (NPS)
+
+```{python}
+#| label: nps
+def best_transposition(A):
+    """Exact minimum of the symmetry coefficient over all transpositions."""
+    deg = A.sum(1)
+    sd = deg[:, None] + deg[None, :] - 2 * A @ A - 2 * A
+    np.fill_diagonal(sd, np.inf)
+    return 4 * sd.min() / (len(A) * (len(A) - 1))
+
+rows = []
+for gdir, g in GRAPH_DIRS.items():          # synthetic types only
+    for f in sorted((GRAPH_DIR / gdir).glob(f"*nNodes{N}_*.p")):
+        mt = re.search(r"density(\d+)(?:_rew(\d+))?", f.name)
+        for sim, a in pickle.load(open(f, "rb")).items():
+            A = (np.asarray(a) != 0).astype(float)
+            rows.append(dict(graph_type=g, n_nodes=N, density=int(mt[1]),
+                             rew=float(mt[2]) if mt[2] else -1.0, sim_id=sim,
+                             S_nps=best_transposition(A)))
+nps = pd.DataFrame(rows).set_index(KEY)
+both = best.join(nps, how="inner")
+print(f"{len(both)} instances with NPS and method results "
+      f"({len(best)} with method results)")
+```
+
+```{python}
+#| label: tbl-nps
+grp = both.groupby(["graph_type", "density", "rew"])
+medS = grp[ORDER].median()
+lines = []
+for (g, rho, k), r in medS.sort_index(key=lambda s: s.map(
+        lambda v: TYPE_ORDER.index(v) if v in TYPE_ORDER else v)).iterrows():
+    sub = both.xs((g, rho, k), level=["graph_type", "density", "rew"])
+    bm = r.drop("QSA").idxmin()
+    beats = (sub[ORDER].min(axis=1) < sub.S_nps - 1e-12).mean()
+    lab = g + (f", $k={REWIRING[int(k)]}$" if k >= 0 else "")
+    lines.append(f"{lab} & {rho / 100:.2f} & {r['QSA']:.3f} & {r[bm]:.3f} ({bm}) & "
+                 f"{sub.S_nps.median():.4f} & {100 * (sub.S_nps == 0).mean():.0f}\\% & "
+                 f"{100 * beats:.0f}\\% \\\\")
+write(COST_TABLE_DIR / "nps.tex", "\n".join([
+    r"% Generated by notebooks/05_Tables.qmd; do not edit.",
+    r"\begin{tabular}{@{}llrlrrr@{}}", r"\toprule",
+    r"Network & $\rho$ & median $S$, QSA & best other method & NPS & NPS exact & "
+    r"some method beats NPS \\", r"\midrule", *lines, r"\bottomrule", r"\end{tabular}", ""]))
+```
