@@ -62,6 +62,30 @@ each method and their relative strengths across varying problem instances and to
 ## Experimental Setup
 
 ```{python}
+#| label: configuration
+#| code-summary: "Configuration settings"
+from pathlib import Path
+
+# Input: processed results of 00_Load_and_Process.qmd (synthetic networks only)
+RESULTS_FILE = Path("processed_data/graph_symmetry_results_all.csv")
+
+# Add the MF conjugate-gradient (MF-CG) and trust-region (MF-TR) variants to
+# every iterative-method figure and table
+INCLUDE_MF_VARIANTS = True
+
+# Loss analysed for each temperature method: DR uses the indefinite loss L_I
+# stated in the paper; for OR the convex and indefinite losses coincide
+TEMPERATURE_LOSS = {
+    "DimensionalityReduction": "indefinite",
+    "OrthogonalRelaxation": "convex",
+}
+
+# Output directories for figures and LaTeX tables
+FIGURE_DIR = Path("figures")
+TABLE_DIR = Path("tables")
+```
+
+```{python}
 #| label: setup
 #| code-summary: "Import libraries and set up visualization defaults"
 
@@ -132,6 +156,14 @@ METHOD_COLORS.update(
     ], sns.color_palette("deep")[3:5]
     ))
 )
+# MF variants take the next colours of the same palette
+METHOD_COLORS.update(
+    dict(zip([
+    'ManifoldCG',
+    'ManifoldTR',
+    ], sns.color_palette("deep")[5:7]
+    ))
+)
 
 
 # Method name mapping
@@ -141,10 +173,27 @@ METHOD_NAMES = {
     'InteriorPoint': 'IP',
     'DimensionalityReduction': 'DR',
     'OrthogonalRelaxation': 'OR',
+    'ManifoldCG': 'MF-CG',
+    'ManifoldTR': 'MF-TR',
 }
+
+# Methods compared in the iterative-method and unified analyses
+ITERATIVE_METHODS = ["QSA", "Manifold", "InteriorPoint"]
+if INCLUDE_MF_VARIANTS:
+    ITERATIVE_METHODS = ["QSA", "Manifold", "ManifoldCG", "ManifoldTR", "InteriorPoint"]
+TEMPERATURE_METHODS = ["DimensionalityReduction", "OrthogonalRelaxation"]
+ITERATIVE_DISPLAY = [METHOD_NAMES[m] for m in ITERATIVE_METHODS]
+ALL_DISPLAY = ITERATIVE_DISPLAY + ['DR', 'OR']
+# Order used in the statistical comparison figures
+STAT_DISPLAY = ['QSA', 'IP'] + [m for m in ITERATIVE_DISPLAY if m.startswith('MF')] + ['OR', 'DR']
 
 # Set the color palette
 sns.set_palette(list(METHOD_COLORS.values()))
+
+def thicken_legend_lines(legend, linewidth=3):
+    """Widen the legend handles so that the method colours are visible."""
+    for handle in legend.legend_handles:
+        handle.set_linewidth(linewidth)
 
 # Define graph type constants
 STANDARD_GRAPH_TYPES = ["ER", "BA", "GEO2D", "GEO3D", "DD", "HK", "BRAIN"]
@@ -152,10 +201,10 @@ ALL_GRAPH_TYPES = ["ER", "BA", "LRM", "GEO2D", "GEO3D", "DD", "HK", "BRAIN"]
 STANDARD_WITH_LRM = ["ER", "BA", "GEO2D", "GEO3D", "DD", "HK", "LRM", "BRAIN"]
 
 # Create output directory for figures
-figure_dir = Path("figures")
-table_dir = Path("tables")
-figure_dir.mkdir(exist_ok=True)
-table_dir.mkdir(exist_ok=True)
+figure_dir = FIGURE_DIR
+table_dir = TABLE_DIR
+figure_dir.mkdir(parents=True, exist_ok=True)
+table_dir.mkdir(parents=True, exist_ok=True)
 
 # Helper function to save figures
 def save_figure(fig, name):
@@ -286,8 +335,10 @@ def save_table(df, name, caption="", show_index=None, longtable=False, **kwargs)
 #| code-summary: "Load experimental results data"
 
 # Load the experimental results
-output_dir = Path("processed_data")
-df = pd.read_csv(output_dir / "graph_symmetry_results_brain.csv")
+df = pd.read_csv(RESULTS_FILE)
+
+if not INCLUDE_MF_VARIANTS:
+    df = df[~df['method'].isin(["ManifoldCG", "ManifoldTR"])]
 
 # Preprocess: Rename GEO to GEO2D for consistency
 df['graph_type'] = df['graph_type'].replace({'GEO': 'GEO2D'})
@@ -322,8 +373,16 @@ df['density'] = (df['density'] / 100).apply(lambda x: f"{x:.2f}")
 ```
 
 ```{python}
+# Keep only the graph types present in the data; BRAIN is not part of RESULTS_FILE
+present_graph_types = set(df['graph_type'].unique())
+STANDARD_GRAPH_TYPES = [g for g in STANDARD_GRAPH_TYPES if g in present_graph_types]
+ALL_GRAPH_TYPES = [g for g in ALL_GRAPH_TYPES if g in present_graph_types]
+STANDARD_WITH_LRM = [g for g in STANDARD_WITH_LRM if g in present_graph_types]
+```
+
+```{python}
 hlp = df.filter(regex='^method').drop_duplicates()
-df_iter_params = hlp[hlp["method"].isin(["QSA", "Manifold", "InteriorPoint"])]
+df_iter_params = hlp[hlp["method"].isin(ITERATIVE_METHODS)]
 df_temp_params = hlp[hlp["method"].isin(["SoftSort", "OT4P4AS"])]
 df_iter_params.set_index(list(df_iter_params.columns))
 df_temp_params.set_index(list(df_iter_params.columns))
@@ -385,12 +444,12 @@ optimization (MF), and second-order methods (IP).
 #| code-summary: "Filter data for iterative methods"
 
 # Filter for iterative methods
-iterative_methods = ["QSA", "Manifold", "InteriorPoint"]
+iterative_methods = ITERATIVE_METHODS
 df_iterative = df[df["method"].isin(iterative_methods)].copy()
 
 # Ensure consistent ordering
 graph_types = ALL_GRAPH_TYPES
-method_order = ['QSA', 'MF', 'IP']
+method_order = ITERATIVE_DISPLAY
 ```
 
 ## Identity Avoidance and Parameter Selection {#sec-identity}
@@ -442,7 +501,7 @@ for graph_type in standard_graph_types:
         x='c', 
         y='success_rate', 
         hue='method_display',
-        palette={METHOD_NAMES[m]: METHOD_COLORS[m] for m in ["QSA", "Manifold", "InteriorPoint"]},
+        palette={METHOD_NAMES[m]: METHOD_COLORS[m] for m in ITERATIVE_METHODS},
         style="density",
         col="n_nodes", 
         row="graph_type",
@@ -457,6 +516,7 @@ for graph_type in standard_graph_types:
             text.set_text('Method')
         elif text.get_text() == 'density':
             text.set_text('Density')
+    thicken_legend_lines(g._legend)
     
     g.set_axis_labels("Penalty parameter $c$", "Success rate")
     g.set_titles("{row_name} ($n={col_name}$)")
@@ -473,7 +533,7 @@ if not lrm_data.empty:
         x='c', 
         y='success_rate', 
         hue='method_display',
-        palette={METHOD_NAMES[m]: METHOD_COLORS[m] for m in ["QSA", "Manifold", "InteriorPoint"]},
+        palette={METHOD_NAMES[m]: METHOD_COLORS[m] for m in ITERATIVE_METHODS},
         style="density",
         col="rew",
         row="n_nodes",
@@ -488,6 +548,7 @@ if not lrm_data.empty:
             text.set_text('Method')
         elif text.get_text() == 'density':
             text.set_text('Density')
+    thicken_legend_lines(g._legend)
     
     g.set_axis_labels("Penalty parameter $c$", "Success rate")
     g.set_titles("LRM ($n={row_name}$, $k={col_name}$)")
@@ -511,7 +572,7 @@ unified_identity_data['graph_type'] = pd.Categorical(
     unified_identity_data['graph_type'], 
     categories=standard_graph_types, 
     ordered=True
-)
+).remove_unused_categories()
 
 # Create the unified FacetGrid
 g = sns.relplot(
@@ -519,7 +580,7 @@ g = sns.relplot(
     x='c', 
     y='success_rate', 
     hue='method_display',
-    palette={METHOD_NAMES[m]: METHOD_COLORS[m] for m in ["QSA", "Manifold", "InteriorPoint"]},
+    palette={METHOD_NAMES[m]: METHOD_COLORS[m] for m in ITERATIVE_METHODS},
     style="density",
     col="n_nodes", 
     row="graph_type",
@@ -539,6 +600,7 @@ for text in g._legend.get_texts():
 
 # Move legend to the right side, vertically centered
 sns.move_legend(g, "center left", bbox_to_anchor=(1.02, 0.5), frameon=True)
+thicken_legend_lines(g._legend)
 
 # Set axis labels and titles
 g.set_axis_labels("", "")  # Remove individual axis labels
@@ -577,7 +639,7 @@ g = sns.displot(
     data=df_iterative,
     x="metric_iterations",
     hue="method_display",
-    palette={METHOD_NAMES[m]: METHOD_COLORS[m] for m in ["QSA", "Manifold", "InteriorPoint"]},
+    palette={METHOD_NAMES[m]: METHOD_COLORS[m] for m in ITERATIVE_METHODS},
     col="method_display",
     row="graph_type",
     kind="hist",
@@ -730,7 +792,7 @@ for graph_type in standard_graph_types:
         x="c",
         y="symmetry",
         hue="method_display",
-        palette={METHOD_NAMES[m]: METHOD_COLORS[m] for m in ["QSA", "Manifold", "InteriorPoint"]},
+        palette={METHOD_NAMES[m]: METHOD_COLORS[m] for m in ITERATIVE_METHODS},
         style="density",
         col="n_nodes",
         row="graph_type",
@@ -744,6 +806,7 @@ for graph_type in standard_graph_types:
             text.set_text('Method')
         elif text.get_text() == 'density':
             text.set_text('Density')
+    thicken_legend_lines(g._legend)
     
     g.set_axis_labels("Penalty parameter $c$", "Symmetry coefficient")
     g.set_titles("{row_name} ($n={col_name}$)")
@@ -761,7 +824,7 @@ if not lrm_data.empty:
         x="c",
         y="symmetry",
         hue="method_display",
-        palette={METHOD_NAMES[m]: METHOD_COLORS[m] for m in ["QSA", "Manifold", "InteriorPoint"]},
+        palette={METHOD_NAMES[m]: METHOD_COLORS[m] for m in ITERATIVE_METHODS},
         style="density",
         row="n_nodes",
         col="rew",
@@ -776,6 +839,7 @@ if not lrm_data.empty:
             text.set_text('Method')
         elif text.get_text() == 'density':
             text.set_text('Density')
+    thicken_legend_lines(g._legend)
     
     g.set_axis_labels("Penalty parameter $c$", "Symmetry coefficient")
     g.set_titles("LRM ($n={row_name}$, $k={col_name}$)")
@@ -802,7 +866,7 @@ unified_symmetry_data['graph_type'] = pd.Categorical(
     unified_symmetry_data['graph_type'], 
     categories=standard_graph_types, 
     ordered=True
-)
+).remove_unused_categories()
 
 # Create the unified FacetGrid
 g = sns.relplot(
@@ -810,7 +874,7 @@ g = sns.relplot(
     x='c', 
     y='symmetry', 
     hue='method_display',
-    palette={METHOD_NAMES[m]: METHOD_COLORS[m] for m in ["QSA", "Manifold", "InteriorPoint"]},
+    palette={METHOD_NAMES[m]: METHOD_COLORS[m] for m in ITERATIVE_METHODS},
     style="density",
     col="n_nodes", 
     row="graph_type",
@@ -831,6 +895,7 @@ for text in g._legend.get_texts():
 
 # Move legend to the right side, vertically centered
 sns.move_legend(g, "center left", bbox_to_anchor=(1.02, 0.5), frameon=True)
+thicken_legend_lines(g._legend)
 
 # Set axis labels and titles
 g.set_axis_labels("", "")  # Remove individual axis labels
@@ -1032,7 +1097,7 @@ def rank_c_values_stratified(method_data, symmetry_data, method_name):
 optimal_c = []
 voting_details_c = []
 
-for method in ["QSA", "Manifold", "InteriorPoint"]:
+for method in ITERATIVE_METHODS:
     method_display = METHOD_NAMES[method]
     method_success = success_by_sim[success_by_sim["method_display"] == method_display]
     method_symmetry = symmetry_data[symmetry_data["method_display"] == method_display]
@@ -1112,7 +1177,7 @@ voting_details_c_df = pd.DataFrame(voting_details_c)
 print("\n" + "="*80)
 print("Top 3 c Values per Stratum (Graph Type × Size × Density):")
 print("="*80)
-for method in [METHOD_NAMES[m] for m in ["QSA", "Manifold", "InteriorPoint"]]:
+for method in [METHOD_NAMES[m] for m in ITERATIVE_METHODS]:
     print(f"\n{method} Method:")
     method_votes = voting_details_c_df[voting_details_c_df['Method'] == method]
     if not method_votes.empty:
@@ -1167,7 +1232,7 @@ for graph_type in standard_graph_types:
         x="n_nodes",
         y="symmetry", 
         hue="method_display",
-        palette={METHOD_NAMES[m]: METHOD_COLORS[m] for m in ["QSA", "Manifold", "InteriorPoint"]},
+        palette={METHOD_NAMES[m]: METHOD_COLORS[m] for m in ITERATIVE_METHODS},
         row="graph_type",
         col="density",
         kind="box",
@@ -1193,7 +1258,7 @@ if not lrm_best.empty:
         x="rew",
         y="symmetry",
         hue="method_display",
-        palette={METHOD_NAMES[m]: METHOD_COLORS[m] for m in ["QSA", "Manifold", "InteriorPoint"]},
+        palette={METHOD_NAMES[m]: METHOD_COLORS[m] for m in ITERATIVE_METHODS},
         col="n_nodes",
         row="density",
         kind="box",
@@ -1226,7 +1291,7 @@ unified_symmetry_data['graph_type'] = pd.Categorical(
     unified_symmetry_data['graph_type'], 
     categories=standard_graph_types, 
     ordered=True
-)
+).remove_unused_categories()
 
 # Create the unified FacetGrid
 g = sns.catplot(
@@ -1234,7 +1299,7 @@ g = sns.catplot(
     x="n_nodes",
     y="symmetry", 
     hue="method_display",
-    palette={METHOD_NAMES[m]: METHOD_COLORS[m] for m in ["QSA", "Manifold", "InteriorPoint"]},
+    palette={METHOD_NAMES[m]: METHOD_COLORS[m] for m in ITERATIVE_METHODS},
     row="graph_type",
     col="density",
     kind="box",
@@ -1249,6 +1314,7 @@ g._legend.set_title("Method")
 
 # Move legend to the right side, vertically centered
 sns.move_legend(g, "center left", bbox_to_anchor=(1.02, 0.5), frameon=True)
+thicken_legend_lines(g._legend)
 
 # Set titles
 g.set_titles("{row_name} ($\\rho={col_name}$)")
@@ -1282,7 +1348,7 @@ Boxplots: symmetry at chosen $c$ across graph type, size, density, rewiring. Use
 
 # Calculate summary statistics
 summary_stats = []
-for method in ["QSA", "Manifold", "InteriorPoint"]:
+for method in ITERATIVE_METHODS:
     optimal_best_method = optimal_best[optimal_best["method_display"] == METHOD_NAMES[method]]
     
     groups = (
@@ -1326,7 +1392,7 @@ save_table(
 # 
 # # Calculate summary statistics with proper multi-index grouping
 # summary_stats = []
-# for method in ["QSA", "Manifold", "InteriorPoint"]:
+# for method in ITERATIVE_METHODS:
 #     method_data = optimal_best[optimal_best["method_display"] == METHOD_NAMES[method]]
 #     
 #     for (graph_type, rew_label), group_data in method_data.groupby(['graph_type', 'rew'], dropna=False):
@@ -1363,7 +1429,7 @@ We now examine the two temperature-based methods: Dimensionality Reduction (DR)
 and Orthogonal Relaxation (OR). These methods employ continuous relaxation 
 controlled by a temperature parameter τ, balancing between continuous optimization 
 (high τ) and discrete constraints (low τ). This section first analyzes the 
-fundamental behavior using convex loss functions without annealing, then extends 
+fundamental behavior using each method's loss (`TEMPERATURE_LOSS`) without annealing, then extends 
 to advanced comparisons of loss formulations and annealing strategies.
 
 ```{python}
@@ -1399,11 +1465,11 @@ for method in df_temp['method_display'].unique():
 
 ```{python}
 #| label: filter-temperature-basic
-#| code-summary: "Filter data for basic temperature analysis (convex loss, no annealing)"
+#| code-summary: "Filter data for basic temperature analysis (paper loss, no annealing)"
 
-# Filter for convex loss without annealing
+# Filter for each method's loss (TEMPERATURE_LOSS) without annealing
 df_temp_basic = df_temp[
-    (df_temp['method_loss'] == 'convex') & 
+    (df_temp['method_loss'] == df_temp['method'].map(TEMPERATURE_LOSS)) & 
     (~df_temp['is_anneal'])
 ].copy()
 
@@ -1417,7 +1483,7 @@ print(f"  Penalty (c): {sorted(df_temp_basic['c'].unique())}")
 ## Basic Parameter Analysis {#sec-temperature-basic}
 
 We begin by analyzing the fundamental effects of temperature (τ) and penalty (c) 
-parameters using convex loss functions without annealing. This establishes baseline 
+parameters using each method's loss (`TEMPERATURE_LOSS`) without annealing. This establishes baseline 
 understanding before examining more complex loss formulations.
 
 ### Identity Avoidance {#sec-temperature-identity}
@@ -1508,6 +1574,7 @@ for method in ["DR", "OR"]:
                 text.set_text('Density')
             elif text.get_text() == 'method_initial_tau':
                 text.set_text(r'Temperature $\tau$')
+        thicken_legend_lines(g._legend)
         
         g.set_axis_labels("Penalty parameter $c$", "Success rate")
         g.set_titles("$n={col_name}$")
@@ -1558,6 +1625,7 @@ for method in ["DR", "OR"]:
                 text.set_text('Density')
             elif text.get_text() == 'method_initial_tau':
                 text.set_text(r'Temperature $\tau$')
+        thicken_legend_lines(g._legend)
 
         # Set x-axis to log scale
         for ax in g.axes.flat:
@@ -1595,7 +1663,7 @@ for method in ["DR", "OR"]:
         unified_data['graph_type'],
         categories=standard_graph_types,
         ordered=True
-    )
+    ).remove_unused_categories()
     
     g = sns.relplot(
         data=unified_data,
@@ -1621,6 +1689,7 @@ for method in ["DR", "OR"]:
     
     # Move legend to the right
     sns.move_legend(g, "center left", bbox_to_anchor=(1.02, 0.5), frameon=True)
+    thicken_legend_lines(g._legend)
     
     g.set_titles("{row_name} ($n={col_name}$)")
     g.fig.suptitle(
@@ -1906,7 +1975,7 @@ for method in ["DR", "OR"]:
         unified_data['graph_type'],
         categories=standard_graph_types,
         ordered=True
-    )
+    ).remove_unused_categories()
     
     # Compute mean symmetry for each combination
     heatmap_data = (
@@ -2047,7 +2116,7 @@ for method in ["DR", "OR"]:
             unified_data['graph_type'],
             categories=standard_graph_types,
             ordered=True
-        )
+        ).remove_unused_categories()
         
         # Compute mean symmetry for each combination
         heatmap_data = (
@@ -2551,7 +2620,7 @@ if not unified_optimal.empty:
         unified_optimal['graph_type'],
         categories=standard_graph_types,
         ordered=True
-    )
+    ).remove_unused_categories()
     
     g = sns.catplot(
         data=unified_optimal,
@@ -2572,6 +2641,7 @@ if not unified_optimal.empty:
     
     # Move legend to the right
     sns.move_legend(g, "center left", bbox_to_anchor=(1.02, 0.5), frameon=True)
+    thicken_legend_lines(g._legend)
     
     g.set_titles("{row_name} ($\\rho={col_name}$)")
     g.fig.suptitle(
@@ -3005,7 +3075,8 @@ def create_lrm_loss_comparison_heatmap(data, method_name, save_name):
         plt.show()
 
 # Create visualizations for both methods (LRM networks)
-for method in ['DR', 'OR']:
+# Skipped when the data has no convex/indefinite loss pairs to compare
+for method in (['DR', 'OR'] if not overall_df.empty else []):
     create_lrm_loss_comparison_heatmap(overall_df, method, 'loss-comparison-heatmap')
 ```
 
@@ -3214,7 +3285,8 @@ def create_er_ba_loss_comparison_heatmap(data, method_name, graph_type, save_nam
 
 # Create visualizations for standard graph types (excluding LRM which has different structure)
 standard_graph_types = STANDARD_GRAPH_TYPES
-for method in ['DR', 'OR']:
+# Skipped when the data has no convex/indefinite loss pairs to compare
+for method in (['DR', 'OR'] if not overall_df.empty else []):
     for graph_type in standard_graph_types:
         # Skip if no data available for this graph type
         graph_subset = overall_df[overall_df['Graph Type'] == graph_type]
@@ -3728,13 +3800,9 @@ def build_optimal_configs_per_graph_type(df, df_temp, success_by_sim, success_by
     # Process iterative methods
     # Map between method names in df ('QSA', 'Manifold', 'InteriorPoint') 
     # and display names in success_by_sim ('QSA', 'MF', 'IP')
-    method_mapping = {
-        'QSA': 'QSA',
-        'Manifold': 'MF', 
-        'InteriorPoint': 'IP'
-    }
+    method_mapping = {m: METHOD_NAMES[m] for m in ITERATIVE_METHODS}
     
-    for method in ['QSA', 'Manifold', 'InteriorPoint']:
+    for method in ITERATIVE_METHODS:
         configs[method] = {}
         method_display = method_mapping[method]
         
@@ -3829,7 +3897,7 @@ def build_optimal_configs_per_graph_type(df, df_temp, success_by_sim, success_by
                 config_sym = method_symmetry[
                     (method_symmetry['method_initial_tau'] == tau_val) &
                     (method_symmetry['c'] == c_val) &
-                    (method_symmetry['method_loss'] == 'convex') &
+                    (method_symmetry['method_loss'] == TEMPERATURE_LOSS[method]) &
                     (method_symmetry['method_final_tau'].isna())
                 ]['symmetry']
                 
@@ -3844,7 +3912,7 @@ def build_optimal_configs_per_graph_type(df, df_temp, success_by_sim, success_by
                 configs[method][graph_type] = {
                     'method_initial_tau': best_tau,
                     'c': best_c,
-                    'method_loss': 'convex'
+                    'method_loss': TEMPERATURE_LOSS[method]
                 }
     
     return configs
@@ -3875,9 +3943,10 @@ def build_optimal_configs(mode, df=None, df_temp=None, success_by_sim=None, succ
     """
     if mode == "global":
         # Extract global optimal values from ranked voting DataFrames
-        qsa_optimal_c = optimal_c_df[optimal_c_df['Method'] == 'QSA']['Optimal c'].iloc[0]
-        manifold_optimal_c = optimal_c_df[optimal_c_df['Method'] == 'MF']['Optimal c'].iloc[0]
-        ip_optimal_c = optimal_c_df[optimal_c_df['Method'] == 'IP']['Optimal c'].iloc[0]
+        iterative_configs = {
+            m: {'c': optimal_c_df[optimal_c_df['Method'] == METHOD_NAMES[m]]['Optimal c'].iloc[0]}
+            for m in ITERATIVE_METHODS
+        }
         
         dr_optimal_tau = optimal_temp_df[optimal_temp_df['Method'] == 'DR']['Optimal tau'].iloc[0]
         dr_optimal_c = optimal_temp_df[optimal_temp_df['Method'] == 'DR']['Optimal c'].iloc[0]
@@ -3886,24 +3955,16 @@ def build_optimal_configs(mode, df=None, df_temp=None, success_by_sim=None, succ
         or_optimal_c = optimal_temp_df[optimal_temp_df['Method'] == 'OR']['Optimal c'].iloc[0]
         
         return {
-            'QSA': {
-                'c': qsa_optimal_c
-            },
-            'Manifold': {
-                'c': manifold_optimal_c
-            },
-            'InteriorPoint': {
-                'c': ip_optimal_c
-            },
+            **iterative_configs,
             'DimensionalityReduction': {
                 'method_initial_tau': dr_optimal_tau,
                 'c': dr_optimal_c,
-                'method_loss': 'convex'
+                'method_loss': TEMPERATURE_LOSS['DimensionalityReduction']
             },
             'OrthogonalRelaxation': {
                 'method_initial_tau': or_optimal_tau,
                 'c': or_optimal_c,
-                'method_loss': 'convex'
+                'method_loss': TEMPERATURE_LOSS['OrthogonalRelaxation']
             },
         }
     
@@ -3991,7 +4052,7 @@ unified_data = []
 
 if PARAMETER_MODE == "global":
     # Global mode: use same parameters for all graph types
-    for method in ['QSA', 'Manifold', 'InteriorPoint']:
+    for method in ITERATIVE_METHODS:
         params = get_optimal_params(method, None, optimal_configs, mode=PARAMETER_MODE)
         if params is None:
             continue
@@ -4022,7 +4083,7 @@ elif PARAMETER_MODE == "per_graph_type":
     # Per-graph-type mode: use different parameters for each topology
     standard_graph_types = STANDARD_WITH_LRM
     
-    for method in ['QSA', 'Manifold', 'InteriorPoint']:
+    for method in ITERATIVE_METHODS:
         for graph_type in standard_graph_types:
             params = get_optimal_params(method, graph_type, optimal_configs, mode=PARAMETER_MODE)
             if params is None:
@@ -4088,7 +4149,7 @@ global_configs = build_optimal_configs(
 global_params = []
 
 # Add iterative methods (QSA, MF, IP)
-for method in ['QSA', 'Manifold', 'InteriorPoint']:
+for method in ITERATIVE_METHODS:
     if method in global_configs:
         params = global_configs[method]
         global_params.append({
@@ -4143,7 +4204,7 @@ per_graph_params = []
 standard_graph_types = STANDARD_WITH_LRM
 
 # Add iterative methods
-for method in ['QSA', 'Manifold', 'InteriorPoint']:
+for method in ITERATIVE_METHODS:
     method_display = METHOD_NAMES[method]
     if method in per_graph_configs:
         for graph_type in standard_graph_types:
@@ -4199,7 +4260,7 @@ print("="*80)
 print(per_graph_params_df.to_markdown(index=False, floatfmt=".4f"))
 
 # Split into iterative methods (QSA, MF, IP) and temperature methods (DR, OR)
-iterative_methods = ['QSA', 'MF', 'IP']
+iterative_methods = ITERATIVE_DISPLAY
 temperature_methods = ['DR', 'OR']
 
 # Iterative methods table (c only, no tau)
@@ -4211,7 +4272,7 @@ iterative_params_df_indexed = iterative_params_df.set_index(['Method', 'Graph Ty
 save_table(
     iterative_params_df_indexed,
     "optimal_parameters_per_graph_type_iterative",
-    "Per-graph-type optimal parameters for iterative methods (QSA, MF, IP)",
+    f"Per-graph-type optimal parameters for iterative methods ({', '.join(ITERATIVE_DISPLAY)})",
     label="tab:optimal-parameters-per-graph-type-iterative",
 )
 
@@ -4232,7 +4293,7 @@ save_table(
 print("\n" + "="*80)
 print("Summary:")
 print("="*80)
-for method in ['QSA', 'MF', 'IP', 'DR', 'OR']:
+for method in ALL_DISPLAY:
     method_data = per_graph_params_df[per_graph_params_df['Method'] == method]
     total = len(method_data)
     available = method_data['c'].notna().sum()
@@ -4259,7 +4320,7 @@ for graph_type in graph_types:
                 x="n_nodes",
                 y="symmetry",
                 hue="method_display",
-                hue_order=['QSA', 'MF', 'IP', 'DR', 'OR'],
+                hue_order=ALL_DISPLAY,
                 palette={m: METHOD_COLORS[k] for k, m in METHOD_NAMES.items()},
                 col="density" if graph_type != "LRM" else "rew",
                 kind="box",
@@ -4286,7 +4347,7 @@ for graph_type in graph_types:
                 x="rew",
                 y="symmetry",
                 hue="method_display",
-                hue_order=['QSA', 'MF', 'IP', 'DR', 'OR'],
+                hue_order=ALL_DISPLAY,
                 palette={m: METHOD_COLORS[k] for k, m in METHOD_NAMES.items()},
                 col="n_nodes",
                 row="density",
@@ -4329,14 +4390,14 @@ if not unified_standard.empty:
         unified_standard['graph_type'],
         categories=standard_graph_types,
         ordered=True
-    )
+    ).remove_unused_categories()
     
     g = sns.catplot(
         data=unified_standard,
         x='n_nodes',
         y='symmetry',
         hue='method_display',
-        hue_order=['QSA', 'MF', 'IP', 'DR', 'OR'],
+        hue_order=ALL_DISPLAY,
         palette={m: METHOD_COLORS[k] for k, m in METHOD_NAMES.items()},
         col='density',
         row='graph_type',
@@ -4351,6 +4412,7 @@ if not unified_standard.empty:
     
     # Move legend to the right
     sns.move_legend(g, "center left", bbox_to_anchor=(1.02, 0.5), frameon=True)
+    thicken_legend_lines(g._legend)
     
     g.set_titles("{row_name} ($\\rho={col_name}$)")
     g.fig.suptitle(
@@ -4436,7 +4498,7 @@ if not er_ba_time.empty:
         x="n_nodes",
         y="metric_time",
         hue="method_display",
-        hue_order=['QSA', 'MF', 'IP', 'DR', 'OR'],
+        hue_order=ALL_DISPLAY,
         palette={m: METHOD_COLORS[k] for k, m in METHOD_NAMES.items()},
         row="graph_type",
         col="density",
@@ -4470,7 +4532,7 @@ if not lrm_time.empty:
         x="rew",
         y="metric_time",
         hue="method_display",
-        hue_order=['QSA', 'MF', 'IP', 'DR', 'OR'],
+        hue_order=ALL_DISPLAY,
         palette={m: METHOD_COLORS[k] for k, m in METHOD_NAMES.items()},
         row="density",
         col="n_nodes",
@@ -4508,7 +4570,7 @@ time_data_100 = time_data[time_data["n_nodes"] == 100]
 
 # Create summary statistics table
 time_summary = []
-for method in METHOD_NAMES.values():
+for method in ALL_DISPLAY:  # same method order as the other tables
     method_times = time_data_100[time_data_100["method_display"] == method]["metric_time"]
 
     if not method_times.empty:
@@ -4529,7 +4591,7 @@ print(time_summary_df.to_markdown(index=False, floatfmt=".2f"))
 save_table(
     time_summary_df,
     "computational_time",
-    "Summary of computational time requirements for all optimization methods for networks with $n=100$ nodes. Times are reported in seconds across all experimental runs using optimal parameter configurations. The 'Time Ratio vs QSA' column shows the relative computational cost of each method compared to the baseline QSA method (ratio > 1 indicates slower than QSA). Statistics are computed across all graph types with $n=100$.",
+    "Summary of computational time requirements for all optimization methods for networks with $n=100$ nodes. Times are reported in seconds across all experimental runs using optimal parameter configurations. The 'Time Ratio vs QSA' column shows the relative computational cost of each method compared to the baseline QSA method (ratio $> 1$ indicates slower than QSA). Statistics are computed across all graph types with $n=100$.",
     label="tab:computational-time",
 )
 ```
@@ -4716,7 +4778,7 @@ Extended stratified tests (size, density, rewiring).
 ### Helper Functions for Stratified Analysis
 
 ```{python}
-#| label: stratified-analysis-helpers
+#| label: stratified-analysis-helpers-extended
 #| code-summary: "Define helper functions for stratified statistical visualization"
 
 def compute_pairwise_pvalues(data, methods):
@@ -4916,11 +4978,7 @@ def create_cd_diagram(ax, data, title):
     """
     # Map abbreviated method names to colors
     method_display_colors = {
-        'QSA': METHOD_COLORS['QSA'],
-        'IP': METHOD_COLORS['InteriorPoint'],
-        'MF': METHOD_COLORS['Manifold'],
-        'OR': METHOD_COLORS['OrthogonalRelaxation'],
-        'DR': METHOD_COLORS['DimensionalityReduction']
+        METHOD_NAMES[m]: METHOD_COLORS[m] for m in ITERATIVE_METHODS + TEMPERATURE_METHODS
     }
     
     # Pivot data for Friedman test
@@ -5001,7 +5059,7 @@ def create_stratified_pvalue_heatmaps_er_ba(data, graph_type, save_name):
     save_name : str
         Base name for saving figure
     """
-    methods = ['QSA', 'IP', 'MF', 'OR', 'DR']
+    methods = STAT_DISPLAY
     
     # Filter for graph type
     subset = data[data['graph_type'] == graph_type].copy()
@@ -5094,7 +5152,7 @@ def create_stratified_cohens_d_heatmaps_er_ba(data, graph_type, save_name):
     save_name : str
         Base name for saving figure
     """
-    methods = ['QSA', 'IP', 'MF', 'OR', 'DR']
+    methods = STAT_DISPLAY
     
     subset = data[data['graph_type'] == graph_type].copy()
     sizes = sorted(subset['n_nodes'].unique())
@@ -5237,7 +5295,7 @@ def create_stratified_sign_plots_standard(data, graph_type, save_name):
     save_name : str
         Base name for saving figure
     """
-    methods = ['QSA', 'IP', 'MF', 'OR', 'DR']
+    methods = STAT_DISPLAY
     
     subset = data[data['graph_type'] == graph_type].copy()
     sizes = sorted(subset['n_nodes'].unique())
@@ -5457,7 +5515,7 @@ def create_stratified_mann_whitney_heatmaps(data, graph_type, save_name):
     save_name : str
         Base name for saving figure
     """
-    methods = ['QSA', 'IP', 'MF', 'OR', 'DR']
+    methods = STAT_DISPLAY
     
     # Filter for graph type
     subset = data[data['graph_type'] == graph_type].copy()
@@ -5568,7 +5626,7 @@ def create_stratified_pvalue_heatmaps_lrm(data, save_name, n_nodes=100):
     n_nodes : int
         Network size to analyze (default: 100)
     """
-    methods = ['QSA', 'IP', 'MF', 'OR', 'DR']
+    methods = STAT_DISPLAY
     
     subset = data[
         (data['graph_type'] == 'LRM') &
@@ -5646,7 +5704,7 @@ def create_stratified_cohens_d_heatmaps_lrm(data, save_name, n_nodes=100):
     n_nodes : int
         Network size to analyze (default: 100)
     """
-    methods = ['QSA', 'IP', 'MF', 'OR', 'DR']
+    methods = STAT_DISPLAY
     
     subset = data[
         (data['graph_type'] == 'LRM') &
@@ -5782,7 +5840,7 @@ def create_stratified_sign_plots_lrm(data, save_name, n_nodes=100):
     n_nodes : int
         Network size to analyze (default: 100)
     """
-    methods = ['QSA', 'IP', 'MF', 'OR', 'DR']
+    methods = STAT_DISPLAY
     
     subset = data[
         (data['graph_type'] == 'LRM') &
@@ -5901,7 +5959,7 @@ def create_stratified_mann_whitney_heatmaps_lrm(data, save_name, n_nodes=100):
     n_nodes : int
         Network size to analyze (default: 100)
     """
-    methods = ['QSA', 'IP', 'MF', 'OR', 'DR']
+    methods = STAT_DISPLAY
     
     subset = data[
         (data['graph_type'] == 'LRM') &
@@ -6264,7 +6322,7 @@ def create_composite_figure(
     if method_colors is None:
         method_colors = sns.color_palette("deep")
     
-    method_order = ['QSA', 'MF', 'IP', 'DR', 'OR']
+    method_order = ALL_DISPLAY
     
     sns.boxplot(
         data=subset,
@@ -6378,6 +6436,10 @@ def create_composite_figure(
                  fontsize=24, weight='bold', va='top', ha='right')
     
     ax_pval.set_title("Pairwise Mann-Whitney U Test", fontsize=14, weight='bold')
+    # Vertical column labels and upright row labels, as in the Cohen's D panel;
+    # with seven methods horizontal labels overlap
+    ax_pval.tick_params(axis='x', labelrotation=90)
+    ax_pval.tick_params(axis='y', labelrotation=0)
     
     # Cohen's D Heatmap
     # Use a muted diverging palette with symmetric range

@@ -29,11 +29,11 @@ plt.rcParams.update({
     "pdf.fonttype": 42,
 })
 
-# MF-SD keeps the paper's MF colour; CG/TR colours checked for CVD separation.
+# Colours as METHOD_COLORS in notebooks/04_Final.qmd (seaborn "deep" 1, 5, 6)
 STYLE = {
     "SD": dict(label="MF-SD", color="#dd8452", marker="o"),
-    "CG-HS": dict(label="MF-CG", color="#3d8fa8", marker="s"),
-    "TR-0.3": dict(label="MF-TR", color="#6a3d9a", marker="^"),
+    "CG-HS": dict(label="MF-CG", color="#937860", marker="s"),
+    "TR-0.3": dict(label="MF-TR", color="#da8bc3", marker="^"),
 }
 # Vertical offsets (points) for end labels of the time plot, where SD and CG nearly coincide
 LABEL_NUDGE = {"SD": 7, "CG-HS": -7}
