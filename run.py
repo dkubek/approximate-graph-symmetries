@@ -76,7 +76,7 @@ class OrthogonalRelaxationConfig(BaseConfig):
 
     max_iter: int = 3000
     initial_tau: float = 0.7
-    loss: str = "convex"
+    loss: str = "indefinite"
     final_tau: float = 0.5
     annealing_scheme: str = "exponential"
     decay_steps: int = 5000
@@ -98,7 +98,7 @@ class DimensionalityReductionConfig(BaseConfig):
 
     max_iter: int = 2000
     initial_tau: float = 1.0
-    loss: str = "convex"
+    loss: str = "indefinite"
     final_tau: float = 1e-6
     annealing_scheme: str = "cosine"
     learning_rate: float = 0.1
