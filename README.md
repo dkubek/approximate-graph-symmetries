@@ -1,5 +1,7 @@
 # Approximate Graph Symmetries using Continuous Optimization
 
+[![DOI](https://zenodo.org/badge/890227696.svg)](https://doi.org/10.5281/zenodo.23561550)
+
 > This repository contains the source code and implementation for the Master's thesis, "Using relaxation to compute
 > approximate symmetry of graphs," submitted to the Faculty of Mathematics and Physics at Charles University, and for
 > the article "Relaxations of the approximate symmetry problem" (D. Kubek, D. Hartman, J. Hlinka, C. Matonoha),

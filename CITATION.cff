@@ -21,7 +21,11 @@ version: 1.0.0
 date-released: "2026-10-22"
 license: MIT
 repository-code: "https://github.com/dkubek/approximate-graph-symmetries"
-# doi: 10.5281/zenodo.XXXXXXX  # add the Zenodo concept DOI after the first release
+doi: 10.5281/zenodo.23561550
+identifiers:
+  - type: doi
+    value: 10.5281/zenodo.23561551
+    description: Version 1.0.0, used in the article
 keywords:
   - approximate symmetry
   - graph automorphism
